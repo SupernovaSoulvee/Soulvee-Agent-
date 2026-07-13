@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import * as prompts from "@clack/prompts"
 import { UI } from "../ui"
+import { Config } from "../../config/config"
 
 export const McpCommand = cmd({
   command: "mcp",
@@ -48,6 +49,14 @@ export const McpAddCommand = cmd({
       })
       if (prompts.isCancel(command)) throw new UI.CancelledError()
 
+      await Config.update({
+        mcp: {
+          [name]: {
+            type: "local",
+            command: command.trim().split(/\s+/),
+          },
+        },
+      })
       prompts.log.info(`Local MCP server "${name}" configured with command: ${command}`)
       prompts.outro("MCP server added successfully")
       return
@@ -66,12 +75,34 @@ export const McpAddCommand = cmd({
       })
       if (prompts.isCancel(url)) throw new UI.CancelledError()
 
+      const secret = await prompts.password({
+        message: "Enter bearer token (optional)",
+      })
+      if (prompts.isCancel(secret)) throw new UI.CancelledError()
+
+      const headers = secret ? { Authorization: `Bearer ${secret}` } : undefined
       const client = new Client({
         name: "opencode",
         version: "1.0.0",
       })
-      const transport = new StreamableHTTPClientTransport(new URL(url))
+      const transport = new StreamableHTTPClientTransport(new URL(url), {
+        requestInit: {
+          headers,
+        },
+      })
       await client.connect(transport)
+      await client.listTools()
+      await client.transport?.close()
+      await client.close()
+      await Config.update({
+        mcp: {
+          [name]: {
+            type: "remote",
+            url,
+            headers,
+          },
+        },
+      })
       prompts.log.info(`Remote MCP server "${name}" configured with URL: ${url}`)
     }
 
