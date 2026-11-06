@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soulvee OS</title>
+<meta name="theme-color" content="#0b0715">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/vendor/app.css">
+<script>
+try { var t = localStorage.getItem('cu-theme'); if (t === 'light') document.documentElement.classList.remove('dark'); } catch (e) {}
+</script>
+<script src="/vendor/react.production.min.js"></script>
+<script src="/vendor/react-dom.production.min.js"></script>
+<script src="/vendor/htm.umd.js"></script>
+<style>
+  html, body { margin: 0; }
+  body { -webkit-font-smoothing: antialiased; }
+  .dark option { background: #160f28; color: #f1f5f9; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+  .glow { box-shadow: 0 10px 40px -12px rgba(139, 92, 246, .45); }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-[#0b0715] dark:text-slate-100 font-sans min-h-screen">
+<div id="root"></div>
+<script src="/os-runtime.js"></script>
+<script>
+(function () {
+const { useState, useEffect, useMemo, useRef } = React;
+const html = htm.bind(React.createElement);
+
+/* ---------------- constants ---------------- */
+const BRANDS = [
+  { id: 'smc', name: 'Soulveetainment Media Consults', short: 'SMC', grad: 'from-sky-500 to-blue-600', dot: 'bg-sky-500' },
+  { id: 'dj', name: 'DJ Soulvee', short: 'DJ Soulvee', grad: 'from-violet-600 to-fuchsia-600', dot: 'bg-fuchsia-500' },
+  { id: 'emporium', name: "Soulvee's Emporium", short: 'Emporium', grad: 'from-amber-500 to-orange-600', dot: 'bg-amber-500' },
+  { id: 'efr', name: 'EFR', short: 'EFR', grad: 'from-emerald-500 to-teal-600', dot: 'bg-emerald-500' },
+  { id: 'digital', name: 'Digital Products', short: 'Digital', grad: 'from-rose-500 to-pink-600', dot: 'bg-rose-500' },
+];
+const brandOf = id => BRANDS.find(b => b.id === id) || BRANDS[0];
+
+const VOICE = {
+  dj: 'You are DJ Soulvee (Supernova Soulvee), an Afro-urban DJ and radio broadcaster on Raypower 100.5FM and Metro 97.7FM. Tone: energetic, premium Afro-fusion, confident, visionary — Lagos-rooted with global crossover appeal.',
+  smc: 'You are Soulveetainment Media Consults, a creative and technical media powerhouse doing B2B hospitality-tech and AI-automation consulting from Lagos. Tone: professional, innovative, reliable — clear and persuasive.',
+  emporium: "You are Soulvee's Emporium, a premium African lifestyle and zodiac-themed merch brand. Tone: stylish, aspirational, lifestyle-driven.",
+};
+const voiceFor = b => VOICE[b === 'efr' ? 'dj' : b === 'digital' ? 'smc' : b] || VOICE.smc;
+
+const STAGES = [
+  { id: 'lead', name: 'Lead', p: 10 },
+  { id: 'qualified', name: 'Qualified', p: 25 },
+  { id: 'proposal', name: 'Proposal', p: 50 },
+  { id: 'negotiation', name: 'Negotiation', p: 75 },
+  { id: 'won', name: 'Won', p: 100 },
+  { id: 'lost', name: 'Lost', p: 0 },
+];
+const stageOf = id => STAGES.find(s => s.id === id) || STAGES[0];
+const OFFER_STATUS = ['idea', 'packaging', 'live', 'retired'];
+const MODELS = ['project', 'retainer', 'booking', 'product', 'course', 'licence'];
+const SOURCES = ['Direct', 'Referral', 'WhatsApp', 'Instagram', 'TikTok', 'LinkedIn', 'Email', 'Radio', 'Event', 'Fiverr', 'Upwork', 'Freelancer.com', 'SoundBetter'];
+const METHODS = ['Moniepoint', 'Bank transfer', 'Paystack', 'Flutterwave', 'Stripe', 'PayPal', 'Cash', 'Selar', 'Gumroad', 'Spreadshop', 'Printify', 'TeePublic'];
+const CURRENCIES = ['NGN', 'USD', 'GBP', 'EUR'];
+const COLS = ['offers', 'deals', 'invoices', 'ledger', 'learning'];
+
+const DEFAULT_SETTINGS = {
+  theme: 'dark',
+  company: { name: 'Soulveetainment Media Consults', bn: 'BN 2782266', address: 'Lagos Island East, Lagos, Nigeria', phone: '+2348069769446', email: 'djsoulvee@gmail.com', payment: 'Moniepoint' },
+  h2Target: 0,
+  vatRate: 7.5,
+  whtDefault: 5,
+  fx: { USD: 0, GBP: 0, EUR: 0 },
+  alloc: [
+    { name: 'Tax reserve', pct: 15 },
+    { name: 'Operations', pct: 25 },
+    { name: 'Growth & reinvest', pct: 25 },
+    { name: 'Savings', pct: 20 },
+    { name: 'Owner pay', pct: 15 },
+  ],
+  invoiceSeq: 2,
+};
+const mergeSettings = s => ({ ...DEFAULT_SETTINGS, ...s, company: { ...DEFAULT_SETTINGS.company, ...(s && s.company) }, fx: { ...DEFAULT_SETTINGS.fx, ...(s && s.fx) }, alloc: (s && Array.isArray(s.alloc) && s.alloc.length) ? s.alloc : DEFAULT_SETTINGS.alloc });
+
+/* ---------------- helpers ---------------- */
+const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
+const localDate = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return localDate(d); };
+const num = v => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; };
+const ngn = n => '₦' + Math.round(n || 0).toLocaleString('en-NG');
+const ngnShort = n => { const a = Math.abs(n || 0); if (a >= 1e9) return '₦' + (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B'; if (a >= 1e6) return '₦' + (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M'; if (a >= 1e3) return '₦' + Math.round(n / 1e3) + 'K'; return ngn(n); };
+const fmtDate = iso => { if (!iso) return '—'; const d = new Date(String(iso).length <= 10 ? iso + 'T12:00:00' : iso); return isNaN(d) ? String(iso) : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
+const fmtDateTime = iso => { if (!iso) return '—'; const d = new Date(iso); if (isNaN(d)) return String(iso); return String(iso).length <= 10 ? fmtDate(iso) : d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+const year = new Date().getFullYear();
+const PERIODS = {
+  h2: { label: 'H2 ' + year, from: year + '-07-01', to: year + '-12-31' },
+  year: { label: String(year), from: year + '-01-01', to: year + '-12-31' },
+  all: { label: 'All time', from: '0000-01-01', to: '9999-12-31' },
+};
+const inPeriod = (d, p) => !!d && d >= PERIODS[p].from && d <= PERIODS[p].to;
+
+function invTotals(inv, settings) {
+  const sub = (inv.items || []).reduce((a, it) => a + num(it.amount), 0);
+  const vat = inv.vat ? sub * (num(settings.vatRate) || 7.5) / 100 : 0;
+  const wht = sub * num(inv.wht) / 100;
+  return { sub, vat, total: sub + vat, wht, net: sub + vat - wht };
+}
+const invStatus = inv => (inv.status === 'sent' && inv.dueDate && inv.dueDate < localDate()) ? 'overdue' : (inv.status || 'draft');
+const clientCode = c => (String(c || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8) || 'CLIENT');
+const invNumber = (client, seq) => `INV-SMC-${clientCode(client)}-${String(seq).padStart(3, '0')}`;
+
+function computeSnapshot(data, settings, period = 'h2') {
+  const inc = data.ledger.filter(l => l.type === 'income' && inPeriod(l.date, period));
+  const exp = data.ledger.filter(l => l.type === 'expense' && inPeriod(l.date, period));
+  const income = inc.reduce((a, l) => a + num(l.ngn), 0);
+  const expenses = exp.reduce((a, l) => a + num(l.ngn), 0);
+  const byBrand = BRANDS.map(b => ({ id: b.id, name: b.short, income: inc.filter(l => l.brand === b.id).reduce((a, l) => a + num(l.ngn), 0), expenses: exp.filter(l => l.brand === b.id).reduce((a, l) => a + num(l.ngn), 0) }));
+  const openInv = data.invoices.filter(i => ['sent', 'overdue'].includes(invStatus(i)));
+  const outstanding = openInv.reduce((a, i) => a + invTotals(i, settings).net, 0);
+  const overdue = data.invoices.filter(i => invStatus(i) === 'overdue');
+  const openDeals = data.deals.filter(d => !['won', 'lost'].includes(d.stage));
+  const pipeline = openDeals.reduce((a, d) => a + num(d.value), 0);
+  const weighted = openDeals.reduce((a, d) => a + num(d.value) * (d.prob != null ? num(d.prob) : stageOf(d.stage).p) / 100, 0);
+  const h2Income = data.ledger.filter(l => l.type === 'income' && inPeriod(l.date, 'h2')).reduce((a, l) => a + num(l.ngn), 0);
+  return { period: PERIODS[period].label, income, expenses, net: income - expenses, byBrand, outstanding, openInvoices: openInv.length, overdueCount: overdue.length, overdue, pipeline, weighted, openDeals: openDeals.length, h2Income, h2Target: num(settings.h2Target) };
+}
+
+async function getCap(name) {
+  for (let i = 0; i < 40 && !(window.claude && window.claude.use); i++) await new Promise(r => setTimeout(r, 100));
+  if (!(window.claude && window.claude.use)) return null;
+  try { return await window.claude.use(name); } catch (e) { return null; }
+}
+
+function mcpMessage(e, server) {
+  const s = (e && e.server) || server;
+  switch (e && e.code) {
+    case 'needs_reauth': return `Reconnect ${s} in claude.ai Settings → Connectors.`;
+    case 'server_not_connected': return `Add ${s} in claude.ai Settings → Connectors, then try again.`;
+    case 'selection_required': return `Choose which ${s} account to use in the claude.ai prompt, then try again.`;
+    case 'approval_required': return `This needs your approval — tap the button again and allow it.`;
+    case 'not_in_manifest': return `${s} is turned off for this page. Re-enable it from the page's connector settings.`;
+    case 'blocked_by_policy': return `Your organisation's policy blocks this ${s} action.`;
+    case 'server_unavailable': return `${s} isn't answering right now. Try again in a moment.`;
+    case 'tool_error': return `${s} reported an error: ${e.message || 'unknown'}`;
+    default: return (e && e.message) || `Something went wrong talking to ${s}.`;
+  }
+}
+async function mcpCall(mcp, server, tool, input) {
+  try { const r = await mcp.callTool(server, tool, input); return { ok: true, payload: r && r.payload !== undefined ? r.payload : r }; }
+  catch (e) { return { ok: false, error: mcpMessage(e, server), code: e && e.code }; }
+}
+function sampleMessage(e) {
+  if (!e) return 'The assistant could not answer.';
+  if (e.code === 'not_granted') return 'AI is not enabled for this view.';
+  if (e.code === 'rate_limited') return 'Too many AI requests just now — wait a minute and try again.';
+  return e.message || 'The assistant could not answer.';
+}
+async function askJSON(sample, prompt) {
+  if (typeof sample.json === 'function') {
+    try { const v = await sample.json(prompt); if (v && typeof v === 'object') return v; } catch (e) { if (e && e.code) throw e; }
+  }
+  const r = await sample(prompt);
+  const m = (r.text || '').match(/\{[\s\S]*\}/);
+  if (!m) throw { message: 'The AI did not return a usable offer. Try again.' };
+  return JSON.parse(m[0]);
+}
+
+/* ---------------- data store ---------------- */
+function useStore(toast) {
+  const [mode, setMode] = useState('connecting');
+  const [stale, setStale] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
+  const [data, setData] = useState(() => Object.fromEntries(COLS.map(c => [c, []])));
+  const [settings, setSettings] = useState(() => {
+    let s = DEFAULT_SETTINGS;
+    try { const t = localStorage.getItem('cu-theme'); if (t) s = { ...s, theme: t }; } catch (e) {}
+    return s;
+  });
+  const dbRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true; const unsubs = [];
+    (async () => {
+      const db = await getCap('db');
+      if (!alive) return;
+      if (!db) { setMode('local'); return; }
+      dbRef.current = db; setMode('db');
+      const timer = setTimeout(() => setStale(true), 10000);
+      COLS.forEach(c => {
+        unsubs.push(db.collection(c).onSnapshot(snap => {
+          setData(p => ({ ...p, [c]: snap.docs.map(d => ({ ...d.data(), id: d.id })) }));
+          if (!snap.metadata.fromCache) { clearTimeout(timer); setStale(false); }
+        }, err => { clearTimeout(timer); setStale(false); if (err && err.code === 'revoked') setMode('local'); }));
+      });
+      unsubs.push(db.doc('settings/main').onSnapshot(snap => {
+        if (snap.exists) setSettings(prev => ({ ...mergeSettings(snap.data()), theme: prev.theme }));
+      }, () => {}));
+      const user = await getCap('user');
+      if (user && typeof user.can === 'function') {
+        try { const w = await user.can('data.write'); if (w === false) setReadOnly(true); } catch (e) {}
+      }
+    })();
+    return () => { alive = false; unsubs.forEach(u => { try { u(); } catch (e) {} }); };
+  }, []);
+
+  const fail = e => {
+    if (e && e.code === 'invalid_argument') { setReadOnly(true); toast('You can view this unit but not change it.'); }
+    else if (e && e.code === 'quota_exceeded') toast('Storage is full — delete old records to add more.');
+    else toast('Could not save: ' + ((e && e.message) || 'try again'));
+    throw e;
+  };
+  const add = async (c, obj) => {
+    const id = obj.id || uid();
+    const doc = { ...obj, id, createdAt: obj.createdAt || new Date().toISOString() };
+    if (dbRef.current) { try { await dbRef.current.collection(c).doc(id).set(doc); } catch (e) { fail(e); } }
+    else setData(p => ({ ...p, [c]: [...p[c], doc] }));
+    return doc;
+  };
+  const update = async (c, id, patch) => {
+    if (dbRef.current) { try { await dbRef.current.collection(c).doc(id).update(patch); } catch (e) { fail(e); } }
+    else setData(p => ({ ...p, [c]: p[c].map(x => x.id === id ? { ...x, ...patch } : x) }));
+  };
+  const remove = async (c, id) => {
+    if (dbRef.current) { try { await dbRef.current.collection(c).doc(id).delete(); } catch (e) { fail(e); } }
+    else setData(p => ({ ...p, [c]: p[c].filter(x => x.id !== id) }));
+  };
+  const saveSettings = async s => {
+    setSettings(s);
+    try { localStorage.setItem('cu-theme', s.theme); } catch (e) {}
+    if (dbRef.current) { try { const { theme, ...rest } = s; await dbRef.current.doc('settings/main').set(rest); } catch (e) { fail(e); } }
+  };
+  return { mode, stale, readOnly, data, settings, setSettings, add, update, remove, saveSettings };
+}
+
+/* ---------------- UI atoms ---------------- */
+const inputCls = 'w-full rounded-xl px-3 py-2 text-sm bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-violet-500 placeholder-slate-400 dark:placeholder-slate-500';
+const muted = 'text-slate-500 dark:text-slate-400';
+
+function Card({ children, className = '' }) {
+  return html`<div className=${'rounded-2xl p-4 sm:p-5 border bg-white border-slate-200 shadow-sm dark:bg-white/[0.04] dark:border-white/10 dark:shadow-none ' + className}>${children}</div>`;
+}
+function Btn({ kind = 'primary', small, className = '', ...p }) {
+  const base = small ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm';
+  const k = {
+    primary: 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:opacity-90 shadow-sm',
+    ghost: 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15',
+    good: 'bg-emerald-600 text-white hover:bg-emerald-700',
+    danger: 'bg-rose-50 text-rose-700 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:hover:bg-rose-500/25',
+  }[kind];
+  return html`<button ...${p} className=${`${base} ${k} rounded-xl font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${className}`}>${p.children}</button>`;
+}
+function Field({ label, hint, children, className = '' }) {
+  return html`<label className=${'block ' + className}><span className=${'block text-xs font-medium mb-1 ' + muted}>${label}</span>${children}${hint && html`<span className=${'block text-[11px] mt-1 ' + muted}>${hint}</span>`}</label>`;
+}
+function Input(p) { return html`<input ...${p} className=${inputCls + ' ' + (p.className || '')} />`; }
+function Area(p) { return html`<textarea ...${p} className=${inputCls + ' ' + (p.className || '')} />`; }
+function Select({ value, onChange, options, className = '' }) {
+  return html`<select value=${value} onChange=${e => onChange(e.target.value)} className=${inputCls + ' ' + className}>${options.map(o => typeof o === 'string' ? html`<option key=${o} value=${o}>${o}</option>` : html`<option key=${o.v} value=${o.v}>${o.l}</option>`)}</select>`;
+}
+const brandOptions = BRANDS.map(b => ({ v: b.id, l: b.name }));
+function BrandChip({ id }) {
+  const b = brandOf(id);
+  return html`<span className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200"><span className=${'w-1.5 h-1.5 rounded-full ' + b.dot}></span>${b.short}</span>`;
+}
+function Pill({ tone = 'slate', children }) {
+  const t = {
+    slate: 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300',
+    green: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
+    amber: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+    red: 'bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300',
+    blue: 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300',
+    violet: 'bg-violet-100 text-violet-800 dark:bg-violet-500/15 dark:text-violet-300',
+  }[tone];
+  return html`<span className=${'text-[11px] font-semibold px-2 py-0.5 rounded-full capitalize ' + t}>${children}</span>`;
+}
+function Modal({ title, onClose, children, footer, wide }) {
+  return html`<div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm" onClick=${onClose}>
+    <div className=${'w-full ' + (wide ? 'sm:max-w-2xl' : 'sm:max-w-lg') + ' max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white dark:bg-[#150d26] border border-slate-200 dark:border-white/10 p-5'} onClick=${e => e.stopPropagation()}>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold text-base">${title}</h3>
+        <button onClick=${onClose} className="w-8 h-8 rounded-full bg-slate-100 dark:bg-white/10 text-sm" aria-label="Close">✕</button>
+      </div>
+      ${children}
+      ${footer && html`<div className="mt-5 flex flex-wrap gap-2 justify-end">${footer}</div>`}
+    </div>
+  </div>`;
+}
+function Empty({ title, children }) {
+  return html`<div className="text-center py-8 px-4"><p className="font-medium text-sm">${title}</p>${children && html`<div className=${'text-xs mt-1 ' + muted}>${children}</div>`}</div>`;
+}
+function Section({ title, sub, action, children }) {
+  return html`<section className="space-y-3">
+    <div className="flex items-end justify-between gap-3 flex-wrap">
+      <div><h2 className="text-lg sm:text-xl font-bold tracking-tight">${title}</h2>${sub && html`<p className=${'text-xs sm:text-sm ' + muted}>${sub}</p>`}</div>
+      ${action}
+    </div>
+    ${children}
+  </section>`;
+}
+function Stat({ label, value, sub, grad }) {
+  return html`<div className=${'rounded-2xl p-4 text-white bg-gradient-to-br relative overflow-hidden ' + grad}>
+    <div className="absolute -right-6 -top-6 w-20 h-20 rounded-full bg-white/10"></div>
+    <p className="text-[11px] uppercase tracking-wider text-white/80 font-semibold">${label}</p>
+    <p className="text-xl sm:text-2xl font-extrabold mt-1">${value}</p>
+    ${sub && html`<p className="text-[11px] text-white/80 mt-0.5">${sub}</p>`}
+  </div>`;
+}
+function Chips({ value, onChange, options }) {
+  return html`<div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">${options.map(o => html`<button key=${o.v} onClick=${() => onChange(o.v)} className=${'whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium transition ' + (value === o.v ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300')}>${o.l}</button>`)}</div>`;
+}
+
+/* ---------------- Command ---------------- */
+function CommandView({ store, go, openDeal, openInvoice }) {
+  const { data, settings } = store;
+  const [period, setPeriod] = useState('h2');
+  const s = useMemo(() => computeSnapshot(data, settings, period), [data, settings, period]);
+  const maxBrand = Math.max(1, ...s.byBrand.map(b => b.income));
+  const usd = num(settings.fx.USD);
+  const pct = s.h2Target > 0 ? Math.min(100, s.h2Income / s.h2Target * 100) : 0;
+  const followUps = data.deals.filter(d => !['won', 'lost'].includes(d.stage) && (!d.nextStep || (d.nextDue && d.nextDue <= localDate()))).slice(0, 5);
+  const unpriced = data.offers.filter(o => o.status !== 'retired' && !(o.tiers || []).some(t => num(t.price) > 0)).slice(0, 4);
+
+  return html`<div className="space-y-6">
+    <${Section} title="Command" sub="Skills → offers → pipeline → cash, across every Soulveetainment brand." action=${html`<${Chips} value=${period} onChange=${setPeriod} options=${Object.entries(PERIODS).map(([v, p]) => ({ v, l: p.label }))} />`}>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <${Stat} label="Collected" value=${ngnShort(s.income)} sub=${usd ? '≈ $' + Math.round(s.income / usd).toLocaleString() : s.period} grad="from-emerald-500 to-teal-600" />
+        <${Stat} label="Outstanding" value=${ngnShort(s.outstanding)} sub=${s.openInvoices + ' open · ' + s.overdueCount + ' overdue'} grad="from-amber-500 to-orange-600" />
+        <${Stat} label="Weighted pipeline" value=${ngnShort(s.weighted)} sub=${s.openDeals + ' open deals · ' + ngnShort(s.pipeline) + ' total'} grad="from-violet-600 to-fuchsia-600" />
+        <${Stat} label="Net (after costs)" value=${ngnShort(s.net)} sub=${'Costs ' + ngnShort(s.expenses)} grad="from-sky-500 to-blue-600" />
+      </div>
+    <//>
+
+    <${Card}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="font-semibold text-sm">H2 ${year} revenue target</p>
+        ${s.h2Target > 0 ? html`<span className="text-sm font-bold">${pct.toFixed(0)}%</span>` : html`<${Btn} small kind="ghost" onClick=${() => go('setup')}>Set target</${Btn}>`}
+      </div>
+      <div className="h-3 rounded-full bg-slate-100 dark:bg-white/10 overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-500" style=${{ width: pct + '%' }}></div></div>
+      <p className=${'text-xs mt-2 ' + muted}>${s.h2Target > 0 ? `${ngn(s.h2Income)} of ${ngn(s.h2Target)} collected · ${ngn(Math.max(0, s.h2Target - s.h2Income))} to go` : 'Your combined H2 target is still unconfirmed — set it in Setup so progress tracks here.'}</p>
+    <//>
+
+    <div className="grid lg:grid-cols-2 gap-4">
+      <${Card}>
+        <p className="font-semibold text-sm mb-3">Collected by brand · ${s.period}</p>
+        <div className="space-y-2.5">${s.byBrand.map(b => html`<div key=${b.id}>
+          <div className="flex justify-between text-xs mb-1"><span>${brandOf(b.id).name}</span><span className="font-semibold">${ngn(b.income)}</span></div>
+          <div className="h-2 rounded-full bg-slate-100 dark:bg-white/10 overflow-hidden"><div className=${'h-full rounded-full bg-gradient-to-r ' + brandOf(b.id).grad} style=${{ width: (b.income / maxBrand * 100) + '%' }}></div></div>
+        </div>`)}</div>
+      <//>
+      <${Card}>
+        <div className="flex items-center justify-between mb-3"><p className="font-semibold text-sm">Next money moves</p><${Btn} small kind="ghost" onClick=${() => go('assistant')}>Ask the agent</${Btn}></div>
+        <div className="space-y-2">
+          ${s.overdue.map(i => html`<button key=${i.id} onClick=${() => go('money')} className="w-full text-left p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-sm"><span className="font-medium">Chase ${i.number}</span> · ${i.client} · ${ngn(invTotals(i, settings).net)} <span className=${muted}>was due ${fmtDate(i.dueDate)}</span></button>`)}
+          ${followUps.map(d => html`<button key=${d.id} onClick=${() => openDeal(d)} className="w-full text-left p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-sm"><span className="font-medium">${d.nextStep ? 'Due: ' + d.nextStep : 'Set a next step'}</span> · ${d.client} <span className=${muted}>${ngn(d.value)}</span></button>`)}
+          ${unpriced.map(o => html`<button key=${o.id} onClick=${() => go('skills')} className="w-full text-left p-3 rounded-xl bg-violet-50 dark:bg-violet-500/10 text-sm"><span className="font-medium">Price it:</span> ${o.name} <span className=${muted}>· ${brandOf(o.brand).short}</span></button>`)}
+          ${!s.overdue.length && !followUps.length && !unpriced.length && html`<${Empty} title="Nothing urgent">Every deal has a next step and every offer has a price.<//>`}
+        </div>
+      <//>
+    </div>
+
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <${Btn} onClick=${() => openDeal(null)}>+ Deal</${Btn}>
+      <${Btn} kind="ghost" onClick=${() => openInvoice(null)}>+ Invoice</${Btn}>
+      <${Btn} kind="ghost" onClick=${() => go('skills')}>Convert a skill</${Btn}>
+      <${Btn} kind="ghost" onClick=${() => go('workspace')}>Gmail lead radar</${Btn}>
+    </div>
+  </div>`;
+}
+
+/* ---------------- Skills → Revenue ---------------- */
+function OfferModal({ offer, onClose, onSave }) {
+  const [f, setF] = useState(() => ({
+    brand: 'smc', name: '', pitch: '', model: 'project', status: 'idea', channels: '', firstMove: '',
+    ...(offer || {}),
+    channels: Array.isArray(offer && offer.channels) ? offer.channels.join(', ') : ((offer && offer.channels) || ''),
+    tiers: (offer && offer.tiers && offer.tiers.length ? offer.tiers : [{ name: '', price: '', deliverables: '' }]).map(t => ({ ...t, deliverables: Array.isArray(t.deliverables) ? t.deliverables.join(', ') : (t.deliverables || '') })),
+  }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const setTier = (i, k, v) => setF(p => ({ ...p, tiers: p.tiers.map((t, j) => j === i ? { ...t, [k]: v } : t) }));
+  const save = () => {
+    if (!f.name.trim()) return;
+    onSave({
+      ...f, name: f.name.trim(),
+      channels: f.channels.split(',').map(x => x.trim()).filter(Boolean),
+      tiers: f.tiers.filter(t => t.name || t.price).map(t => ({ name: t.name, price: num(t.price), deliverables: String(t.deliverables).split(',').map(x => x.trim()).filter(Boolean), suggested: !!t.suggested && !t._touched })),
+    });
+  };
+  return html`<${Modal} title=${offer && offer.id ? 'Edit offer' : 'New offer'} onClose=${onClose} wide footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${save} disabled=${!f.name.trim()}>Save offer</${Btn}>`}>
+    <div className="grid sm:grid-cols-2 gap-3">
+      <${Field} label="Offer name" className="sm:col-span-2"><${Input} value=${f.name} onChange=${e => set('name', e.target.value)} placeholder="e.g. MCP Server Build" /><//>
+      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${v => set('brand', v)} options=${brandOptions} /><//>
+      <${Field} label="Revenue model"><${Select} value=${f.model} onChange=${v => set('model', v)} options=${MODELS} /><//>
+      <${Field} label="Status"><${Select} value=${f.status} onChange=${v => set('status', v)} options=${OFFER_STATUS} /><//>
+      <${Field} label="Sales channels" hint="Comma-separated"><${Input} value=${f.channels} onChange=${e => set('channels', e.target.value)} placeholder="LinkedIn, WhatsApp, Selar" /><//>
+      <${Field} label="Pitch" className="sm:col-span-2"><${Area} rows="3" value=${f.pitch} onChange=${e => set('pitch', e.target.value)} /><//>
+      <${Field} label="First move to sell it" className="sm:col-span-2"><${Input} value=${f.firstMove} onChange=${e => set('firstMove', e.target.value)} /><//>
+    </div>
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-2"><p className="text-sm font-semibold">Price tiers (₦)</p><button className="text-xs text-violet-500 font-medium" onClick=${() => set('tiers', [...f.tiers, { name: '', price: '', deliverables: '' }])}>+ Add tier</button></div>
+      <div className="space-y-2">${f.tiers.map((t, i) => html`<div key=${i} className="grid grid-cols-12 gap-2 p-2 rounded-xl bg-slate-50 dark:bg-white/5">
+        <input className=${inputCls + ' col-span-7'} placeholder="Tier name" value=${t.name} onChange=${e => setTier(i, 'name', e.target.value)} />
+        <input className=${inputCls + ' col-span-5'} placeholder="Price ₦" inputMode="numeric" value=${t.price} onChange=${e => { setTier(i, 'price', e.target.value); setTier(i, '_touched', true); }} />
+        <input className=${inputCls + ' col-span-10'} placeholder="Deliverables, comma-separated" value=${t.deliverables} onChange=${e => setTier(i, 'deliverables', e.target.value)} />
+        <button className="col-span-2 text-xs text-rose-500" onClick=${() => set('tiers', f.tiers.filter((_, j) => j !== i))}>Remove</button>
+      </div>`)}</div>
+    </div>
+  <//>`;
+}
+
+function SkillsView({ store, caps, toast, startDeal }) {
+  const { data, add, update, remove } = store;
+  const [brand, setBrand] = useState('all');
+  const [conv, setConv] = useState({ brand: 'smc', skill: '', audience: '' });
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [editing, setEditing] = useState(null);
+
+  const earned = useMemo(() => {
+    const m = {};
+    data.ledger.forEach(l => { if (l.type === 'income' && l.offerId) m[l.offerId] = (m[l.offerId] || 0) + num(l.ngn); });
+    return m;
+  }, [data.ledger]);
+  const offers = data.offers.filter(o => brand === 'all' || o.brand === brand).sort((a, b) => OFFER_STATUS.indexOf(a.status) - OFFER_STATUS.indexOf(b.status) || String(a.name).localeCompare(b.name));
+  const counts = OFFER_STATUS.map(st => ({ st, n: data.offers.filter(o => o.status === st).length }));
+
+  const convert = async () => {
+    if (!caps.sample) return;
+    setBusy(true); setDraft(null);
+    try {
+      const prompt = `${voiceFor(conv.brand)}
+You are packaging one of Soulvee's skills into a sellable offer for the Nigerian (Lagos-first) market, with global reach where it fits.
+Skill: ${conv.skill}
+Target client: ${conv.audience || 'best-fit buyers you identify'}
+Brand: ${brandOf(conv.brand).name}
+Return ONLY a JSON object, no prose:
+{"name": string (short offer name), "pitch": string (2 sentences in the brand voice), "model": one of ${JSON.stringify(MODELS)}, "tiers": [3 objects {"name": string, "price": number (Naira, whole number, realistic for Lagos SMEs/creatives in ${year}), "deliverables": [3-5 short strings]}], "channels": [2-4 strings: where to sell it], "firstMove": string (one concrete action to land the first paying client this week)}`;
+      const v = await askJSON(caps.sample, prompt);
+      setDraft({ brand: conv.brand, status: 'packaging', name: v.name || 'New offer', pitch: v.pitch || '', model: MODELS.includes(v.model) ? v.model : 'project', channels: Array.isArray(v.channels) ? v.channels : [], firstMove: v.firstMove || '', tiers: (v.tiers || []).map(t => ({ name: t.name || '', price: num(t.price), deliverables: Array.isArray(t.deliverables) ? t.deliverables : [], suggested: true })), source: 'ai', skill: conv.skill });
+    } catch (e) { toast(sampleMessage(e)); }
+    setBusy(false);
+  };
+
+  return html`<div className="space-y-6">
+    <${Section} title="Skills → Revenue" sub="Turn what you can do into priced offers, then push them into the pipeline.">
+      <div className="grid grid-cols-4 gap-2">${counts.map(c => html`<div key=${c.st} className="rounded-xl p-3 bg-white border border-slate-200 dark:bg-white/[0.04] dark:border-white/10 text-center"><p className="text-lg font-bold">${c.n}</p><p className=${'text-[11px] capitalize ' + muted}>${c.st}</p></div>`)}</div>
+    <//>
+
+    <${Card} className="glow">
+      <p className="font-semibold text-sm mb-1">✦ Skill converter</p>
+      <p className=${'text-xs mb-3 ' + muted}>Describe a skill — the AI packages it in the right brand voice with three NGN tiers. Prices it suggests are flagged until you confirm them.</p>
+      ${caps.sample === null ? html`<p className="text-sm text-amber-600 dark:text-amber-400">AI is off. Add ANTHROPIC_API_KEY on the Soulvee OS server to use the converter — you can still add offers by hand.</p>` : html`
+      <div className="grid sm:grid-cols-3 gap-3">
+        <${Field} label="Brand"><${Select} value=${conv.brand} onChange=${v => setConv({ ...conv, brand: v })} options=${brandOptions} /><//>
+        <${Field} label="Skill" className="sm:col-span-2"><${Input} value=${conv.skill} onChange=${e => setConv({ ...conv, skill: e.target.value })} placeholder="e.g. I build MCP servers that connect a business's tools to Claude" /><//>
+        <${Field} label="Who pays for it (optional)" className="sm:col-span-3"><${Input} value=${conv.audience} onChange=${e => setConv({ ...conv, audience: e.target.value })} placeholder="e.g. Lagos restaurants, event planners, creatives" /><//>
+      </div>
+      <div className="mt-3 flex gap-2 flex-wrap">
+        <${Btn} onClick=${convert} disabled=${busy || !conv.skill.trim()}>${busy ? 'Packaging…' : 'Convert to offer'}</${Btn}>
+        ${['Building MCP servers that connect business tools to Claude', 'Setting up Google Workspace + Gmail/Calendar automations', 'Teaching AI tools to creatives and SMEs'].map(x => html`<button key=${x} onClick=${() => setConv({ ...conv, skill: x })} className="text-xs px-3 py-1.5 rounded-full bg-slate-100 dark:bg-white/10">${x.split(' ').slice(0, 3).join(' ')}…</button>`)}
+      </div>`}
+      ${draft && html`<div className="mt-4 p-4 rounded-xl border border-violet-300 dark:border-violet-500/40 bg-violet-50/60 dark:bg-violet-500/10">
+        <div className="flex items-center gap-2 flex-wrap"><p className="font-semibold">${draft.name}</p><${BrandChip} id=${draft.brand} /><${Pill} tone="violet">${draft.model}</${Pill}></div>
+        <p className="text-sm mt-1">${draft.pitch}</p>
+        <div className="grid sm:grid-cols-3 gap-2 mt-3">${draft.tiers.map((t, i) => html`<div key=${i} className="p-3 rounded-xl bg-white dark:bg-white/5"><p className="text-xs font-semibold">${t.name}</p><p className="text-lg font-bold">${ngn(t.price)}</p><p className=${'text-[11px] ' + muted}>${t.deliverables.join(' · ')}</p></div>`)}</div>
+        ${draft.firstMove && html`<p className="text-xs mt-3"><span className="font-semibold">First move:</span> ${draft.firstMove}</p>`}
+        <div className="flex gap-2 mt-3"><${Btn} small onClick=${async () => { await add('offers', draft); setDraft(null); toast('Offer saved'); }}>Save to catalogue</${Btn}><${Btn} small kind="ghost" onClick=${() => setEditing(draft)}>Edit first</${Btn}><${Btn} small kind="ghost" onClick=${() => setDraft(null)}>Discard</${Btn}></div>
+      </div>`}
+    <//>
+
+    <${Section} title="Offer catalogue" action=${html`<${Btn} small onClick=${() => setEditing({})}>+ Offer</${Btn}>`}>
+      <${Chips} value=${brand} onChange=${setBrand} options=${[{ v: 'all', l: 'All brands' }, ...BRANDS.map(b => ({ v: b.id, l: b.short }))]} />
+      ${offers.length === 0 ? html`<${Card}><${Empty} title="No offers yet">Convert a skill above or add one by hand.<//><//>` : html`<div className="grid md:grid-cols-2 gap-3">${offers.map(o => {
+        const priced = (o.tiers || []).filter(t => num(t.price) > 0);
+        return html`<${Card} key=${o.id}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0"><p className="font-semibold truncate">${o.name}</p><div className="flex gap-1.5 mt-1 flex-wrap"><${BrandChip} id=${o.brand} /><${Pill} tone=${o.status === 'live' ? 'green' : o.status === 'packaging' ? 'amber' : o.status === 'retired' ? 'slate' : 'blue'}>${o.status}</${Pill}><${Pill}>${o.model || 'project'}</${Pill}></div></div>
+            <div className="text-right shrink-0"><p className=${'text-[10px] uppercase ' + muted}>Earned</p><p className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">${ngnShort(earned[o.id] || 0)}</p></div>
+          </div>
+          ${o.pitch && html`<p className=${'text-xs mt-2 ' + muted}>${o.pitch}</p>`}
+          <div className="mt-3 space-y-1">${priced.length ? priced.map((t, i) => html`<div key=${i} className="flex justify-between text-sm"><span>${t.name}${t.suggested ? html` <span className="text-[10px] text-amber-600 dark:text-amber-400">(suggested)</span>` : ''}</span><span className="font-semibold">${ngn(t.price)}</span></div>`) : html`<p className="text-xs text-amber-600 dark:text-amber-400">No price set yet — tap Edit to add your rate card.</p>`}</div>
+          ${o.firstMove && html`<p className="text-[11px] mt-2"><span className="font-semibold">Next:</span> ${o.firstMove}</p>`}
+          <div className="flex gap-2 mt-3 flex-wrap">
+            <${Btn} small onClick=${() => startDeal(o)}>Start deal</${Btn}>
+            <${Btn} small kind="ghost" onClick=${() => setEditing(o)}>Edit</${Btn}>
+            <select className=${inputCls + ' !w-auto !py-1.5 text-xs'} value=${o.status} onChange=${e => update('offers', o.id, { status: e.target.value })}>${OFFER_STATUS.map(st => html`<option key=${st} value=${st}>${st}</option>`)}</select>
+            <${Btn} small kind="danger" onClick=${() => remove('offers', o.id)}>Delete</${Btn}>
+          </div>
+        <//>`;
+      })}</div>`}
+    <//>
+    ${editing && html`<${OfferModal} offer=${editing} onClose=${() => setEditing(null)} onSave=${async v => { if (editing.id) await update('offers', editing.id, v); else { await add('offers', v); if (editing === draft) setDraft(null); } setEditing(null); toast('Offer saved'); }} />`}
+  </div>`;
+}
+
+/* ---------------- Pipeline ---------------- */
+function DealModal({ deal, offers, onClose, onSave }) {
+  const [f, setF] = useState(() => ({ client: '', email: '', brand: 'smc', offerId: '', value: '', stage: 'lead', prob: '', source: 'Direct', nextStep: '', nextDue: '', notes: '', ...(deal || {}) }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const brandOffers = offers.filter(o => o.brand === f.brand);
+  return html`<${Modal} title=${deal && deal.id ? 'Edit deal' : 'New deal'} onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} disabled=${!String(f.client).trim()} onClick=${() => onSave({ ...f, client: String(f.client).trim(), value: num(f.value), prob: f.prob === '' ? stageOf(f.stage).p : num(f.prob) })}>Save deal</${Btn}>`}>
+    <div className="grid grid-cols-2 gap-3">
+      <${Field} label="Client" className="col-span-2"><${Input} value=${f.client} onChange=${e => set('client', e.target.value)} placeholder="Business or person" /><//>
+      <${Field} label="Client email" className="col-span-2" hint="Needed for Gmail follow-ups and calendar invites"><${Input} type="email" value=${f.email} onChange=${e => set('email', e.target.value)} /><//>
+      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${v => set('brand', v)} options=${brandOptions} /><//>
+      <${Field} label="Offer"><${Select} value=${f.offerId} onChange=${v => { const o = offers.find(x => x.id === v); set('offerId', v); if (o && !num(f.value)) { const t = (o.tiers || []).find(t => num(t.price) > 0); if (t) set('value', t.price); } }} options=${[{ v: '', l: '— none —' }, ...brandOffers.map(o => ({ v: o.id, l: o.name }))]} /><//>
+      <${Field} label="Value (₦)"><${Input} inputMode="numeric" value=${f.value} onChange=${e => set('value', e.target.value)} /><//>
+      <${Field} label="Stage"><${Select} value=${f.stage} onChange=${v => set('stage', v)} options=${STAGES.map(s => ({ v: s.id, l: s.name }))} /><//>
+      <${Field} label="Win chance %"><${Input} inputMode="numeric" value=${f.prob} placeholder=${String(stageOf(f.stage).p)} onChange=${e => set('prob', e.target.value)} /><//>
+      <${Field} label="Source"><${Select} value=${f.source} onChange=${v => set('source', v)} options=${SOURCES} /><//>
+      <${Field} label="Next step" className="col-span-2"><${Input} value=${f.nextStep} onChange=${e => set('nextStep', e.target.value)} placeholder="e.g. Send Option 2 proposal" /><//>
+      <${Field} label="Next step due"><${Input} type="date" value=${f.nextDue} onChange=${e => set('nextDue', e.target.value)} /><//>
+      <${Field} label="Notes" className="col-span-2"><${Area} rows="2" value=${f.notes} onChange=${e => set('notes', e.target.value)} /><//>
+    </div>
+  <//>`;
+}
+
+function FollowUpModal({ deal, offers, caps, toast, onClose, onDone }) {
+  const [subject, setSubject] = useState(`Following up — ${deal.client}`);
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState('');
+  const offer = offers.find(o => o.id === deal.offerId);
+  const write = async () => {
+    if (!caps.sample) return;
+    setBusy('write');
+    try {
+      const r = await caps.sample(`${voiceFor(deal.brand)}
+Write a short follow-up email (under 150 words) from Soulvee to ${deal.client} about ${offer ? offer.name : 'our proposal'} worth ${ngn(deal.value)}. Stage: ${stageOf(deal.stage).name}. Next step we want: ${deal.nextStep || 'agree on next steps'}. Notes: ${deal.notes || 'none'}.
+Plain text only, no markdown, no subject line. Sign off as "Soulvee" with "Soulveetainment Media Consults · +2348069769446" on the line below. Do not invent prices or dates not given here.`, { cache: false });
+      setBody((r.text || '').trim());
+    } catch (e) { toast(sampleMessage(e)); }
+    setBusy('');
+  };
+  const save = async () => {
+    if (!caps.mcp) return;
+    setBusy('save');
+    const res = await mcpCall(caps.mcp, 'Gmail', 'create_draft', { to: deal.email ? [deal.email] : [], subject, body });
+    setBusy('');
+    if (res.ok) { toast('Draft saved in Gmail — review and send it there'); onDone(res.payload && res.payload.viewUrl); }
+    else toast(res.error);
+  };
+  return html`<${Modal} title="Follow-up email" onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${write} disabled=${!caps.sample || !!busy}>${busy === 'write' ? 'Writing…' : body ? 'Rewrite with AI' : 'Write with AI'}</${Btn}><${Btn} onClick=${save} disabled=${!caps.mcp || !body.trim() || !!busy}>${busy === 'save' ? 'Saving…' : 'Save as Gmail draft'}</${Btn}>`}>
+    ${!deal.email && html`<p className="text-xs text-amber-600 dark:text-amber-400 mb-3">No client email on this deal — the draft will have no recipient. Add one via Edit.</p>`}
+    ${!caps.mcp && html`<p className="text-xs text-amber-600 dark:text-amber-400 mb-3">Gmail drafts need the claude.ai version of this page — copy the email instead.</p>`}
+    <div className="space-y-3">
+      <${Field} label="To"><${Input} value=${deal.email || ''} disabled /><//>
+      <${Field} label="Subject"><${Input} value=${subject} onChange=${e => setSubject(e.target.value)} /><//>
+      <${Field} label="Body"><${Area} rows="9" value=${body} onChange=${e => setBody(e.target.value)} placeholder="Write it yourself or let the AI draft it in the brand voice." /><//>
+    </div>
+  <//>`;
+}
+
+function CalendarModal({ prefill, caps, toast, onClose }) {
+  const [f, setF] = useState({ summary: prefill.summary || '', date: addDays(localDate(), 1), time: '11:00', mins: '30', email: prefill.email || '', meet: true, location: '' });
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const create = async () => {
+    if (!caps.mcp) return;
+    const start = `${f.date}T${f.time}:00`;
+    const end = new Date(new Date(start).getTime() + num(f.mins) * 60000);
+    const endIso = localDate(end) + 'T' + String(end.getHours()).padStart(2, '0') + ':' + String(end.getMinutes()).padStart(2, '0') + ':00';
+    const input = { summary: f.summary, startTime: start, endTime: endIso, addGoogleMeetUrl: !!f.meet };
+    if (f.location) input.location = f.location;
+    if (f.email) input.attendees = [{ email: f.email }];
+    setBusy(true);
+    const res = await mcpCall(caps.mcp, 'Google Calendar', 'create_event', input);
+    setBusy(false);
+    if (res.ok) { toast('Event added to Google Calendar'); onClose(); } else toast(res.error);
+  };
+  return html`<${Modal} title="Book on Google Calendar" onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${create} disabled=${!caps.mcp || busy || !f.summary.trim()}>${busy ? 'Booking…' : 'Create event'}</${Btn}>`}>
+    ${!caps.mcp && html`<p className="text-xs text-amber-600 dark:text-amber-400 mb-3">Calendar booking needs the claude.ai version of this page.</p>`}
+    <div className="grid grid-cols-2 gap-3">
+      <${Field} label="Title" className="col-span-2"><${Input} value=${f.summary} onChange=${e => set('summary', e.target.value)} /><//>
+      <${Field} label="Date"><${Input} type="date" value=${f.date} onChange=${e => set('date', e.target.value)} /><//>
+      <${Field} label="Time"><${Input} type="time" value=${f.time} onChange=${e => set('time', e.target.value)} /><//>
+      <${Field} label="Length (mins)"><${Input} inputMode="numeric" value=${f.mins} onChange=${e => set('mins', e.target.value)} /><//>
+      <${Field} label="Invite (email)"><${Input} type="email" value=${f.email} onChange=${e => set('email', e.target.value)} /><//>
+      <${Field} label="Location" className="col-span-2"><${Input} value=${f.location} onChange=${e => set('location', e.target.value)} placeholder="Optional" /><//>
+      <label className="col-span-2 flex items-center gap-2 text-sm"><input type="checkbox" checked=${f.meet} onChange=${e => set('meet', e.target.checked)} /> Add a Google Meet link</label>
+    </div>
+  <//>`;
+}
+
+function PipelineView({ store, caps, toast, openDeal, openInvoice }) {
+  const { data, update, remove } = store;
+  const [filter, setFilter] = useState('open');
+  const [follow, setFollow] = useState(null);
+  const [cal, setCal] = useState(null);
+  const offerName = id => (data.offers.find(o => o.id === id) || {}).name;
+  const list = data.deals.filter(d => filter === 'open' ? !['won', 'lost'].includes(d.stage) : filter === 'all' ? true : d.stage === filter)
+    .sort((a, b) => STAGES.findIndex(s => s.id === b.stage) - STAGES.findIndex(s => s.id === a.stage) || num(b.value) - num(a.value));
+  const stageTotals = STAGES.map(s => ({ ...s, n: data.deals.filter(d => d.stage === s.id).length, v: data.deals.filter(d => d.stage === s.id).reduce((a, d) => a + num(d.value), 0) }));
+  const advance = d => { const i = STAGES.findIndex(s => s.id === d.stage); const next = STAGES[Math.min(i + 1, 4)]; update('deals', d.id, { stage: next.id, prob: next.p }); toast(`${d.client} → ${next.name}`); };
+
+  return html`<div className="space-y-5">
+    <${Section} title="Pipeline" sub="Every gig, consult and product sale on one board." action=${html`<${Btn} small onClick=${() => openDeal(null)}>+ Deal</${Btn}>`}>
+      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">${stageTotals.map(s => html`<div key=${s.id} className="shrink-0 min-w-[110px] rounded-xl p-3 bg-white border border-slate-200 dark:bg-white/[0.04] dark:border-white/10"><p className=${'text-[11px] ' + muted}>${s.name} · ${s.n}</p><p className="font-bold text-sm">${ngnShort(s.v)}</p></div>`)}</div>
+      <${Chips} value=${filter} onChange=${setFilter} options=${[{ v: 'open', l: 'Open' }, ...STAGES.map(s => ({ v: s.id, l: s.name })), { v: 'all', l: 'All' }]} />
+    <//>
+    ${list.length === 0 ? html`<${Card}><${Empty} title="No deals here">Start one from an offer in Skills → Revenue, or tap + Deal.<//><//>` : html`<div className="grid md:grid-cols-2 gap-3">${list.map(d => html`<${Card} key=${d.id}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0"><p className="font-semibold truncate">${d.client}</p><div className="flex gap-1.5 mt-1 flex-wrap"><${BrandChip} id=${d.brand} /><${Pill} tone=${d.stage === 'won' ? 'green' : d.stage === 'lost' ? 'red' : d.stage === 'negotiation' ? 'amber' : 'violet'}>${stageOf(d.stage).name}</${Pill}>${d.source && html`<${Pill}>${d.source}</${Pill}>`}</div></div>
+        <div className="text-right shrink-0"><p className="font-bold">${ngnShort(d.value)}</p><p className=${'text-[11px] ' + muted}>${d.prob != null ? d.prob : stageOf(d.stage).p}% chance</p></div>
+      </div>
+      ${offerName(d.offerId) && html`<p className=${'text-xs mt-2 ' + muted}>Offer: ${offerName(d.offerId)}</p>`}
+      <p className="text-xs mt-1">${d.nextStep ? html`<span className="font-medium">Next:</span> ${d.nextStep}${d.nextDue ? html` <span className=${d.nextDue < localDate() ? 'text-rose-500' : muted}>· ${fmtDate(d.nextDue)}</span>` : ''}` : html`<span className="text-amber-600 dark:text-amber-400">No next step set</span>`}</p>
+      <div className="flex gap-2 mt-3 flex-wrap">
+        ${!['won', 'lost'].includes(d.stage) && html`<${Btn} small onClick=${() => advance(d)}>Advance →</${Btn}>`}
+        ${d.stage !== 'lost' && html`<${Btn} small kind="good" onClick=${() => openInvoice(null, d)}>${d.stage === 'won' ? 'Invoice' : 'Won → Invoice'}</${Btn}>`}
+        <${Btn} small kind="ghost" onClick=${() => setFollow(d)}>✉ Follow up</${Btn}>
+        <${Btn} small kind="ghost" onClick=${() => setCal({ summary: `${brandOf(d.brand).short} × ${d.client}`, email: d.email })}>📅 Book</${Btn}>
+        <${Btn} small kind="ghost" onClick=${() => openDeal(d)}>Edit</${Btn}>
+        ${!['won', 'lost'].includes(d.stage) && html`<${Btn} small kind="danger" onClick=${() => update('deals', d.id, { stage: 'lost', prob: 0 })}>Lost</${Btn}>`}
+        ${d.stage === 'lost' && html`<${Btn} small kind="danger" onClick=${() => remove('deals', d.id)}>Delete</${Btn}>`}
+      </div>
+    <//>`)}</div>`}
+    ${follow && html`<${FollowUpModal} deal=${follow} offers=${data.offers} caps=${caps} toast=${toast} onClose=${() => setFollow(null)} onDone=${() => setFollow(null)} />`}
+    ${cal && html`<${CalendarModal} prefill=${cal} caps=${caps} toast=${toast} onClose=${() => setCal(null)} />`}
+  </div>`;
+}
+
+/* ---------------- Money ---------------- */
+function InvoiceModal({ invoice, deal, store, onClose, toast }) {
+  const { data, settings, add, update, saveSettings } = store;
+  const offer = deal && data.offers.find(o => o.id === deal.offerId);
+  const [f, setF] = useState(() => invoice && invoice.id ? { ...invoice, items: invoice.items.map(i => ({ ...i })) } : {
+    client: deal ? deal.client : '', clientEmail: deal ? (deal.email || '') : '', brand: deal ? deal.brand : 'smc',
+    items: [{ desc: deal ? (offer ? offer.name : 'Services') : '', amount: deal ? String(deal.value || '') : '' }],
+    vat: true, wht: '0', issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft',
+    offerId: deal ? (deal.offerId || '') : '', dealId: deal ? deal.id : '',
+  });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const setItem = (i, k, v) => setF(p => ({ ...p, items: p.items.map((it, j) => j === i ? { ...it, [k]: v } : it) }));
+  const t = invTotals(f, settings);
+  const number = f.number || invNumber(f.client, settings.invoiceSeq);
+  const save = async () => {
+    const doc = { ...f, number, items: f.items.filter(i => i.desc || num(i.amount)).map(i => ({ desc: i.desc, amount: num(i.amount) })), wht: num(f.wht) };
+    if (invoice && invoice.id) await update('invoices', invoice.id, doc);
+    else {
+      await add('invoices', doc);
+      if (!f.number) await saveSettings({ ...settings, invoiceSeq: num(settings.invoiceSeq) + 1 });
+      if (deal && deal.stage !== 'won') await update('deals', deal.id, { stage: 'won', prob: 100 });
+    }
+    toast('Invoice saved'); onClose();
+  };
+  return html`<${Modal} title=${invoice && invoice.id ? 'Edit invoice' : 'New invoice'} wide onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} disabled=${!String(f.client).trim() || t.sub <= 0} onClick=${save}>Save invoice</${Btn}>`}>
+    <div className="grid sm:grid-cols-2 gap-3">
+      <${Field} label="Invoice number" hint="Format INV-SMC-[client]-[number]"><${Input} value=${number} onChange=${e => set('number', e.target.value)} /><//>
+      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${v => set('brand', v)} options=${brandOptions} /><//>
+      <${Field} label="Client"><${Input} value=${f.client} onChange=${e => set('client', e.target.value)} /><//>
+      <${Field} label="Client email"><${Input} type="email" value=${f.clientEmail} onChange=${e => set('clientEmail', e.target.value)} /><//>
+      <${Field} label="Issue date"><${Input} type="date" value=${f.issueDate} onChange=${e => set('issueDate', e.target.value)} /><//>
+      <${Field} label="Due date"><${Input} type="date" value=${f.dueDate} onChange=${e => set('dueDate', e.target.value)} /><//>
+    </div>
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-2"><p className="text-sm font-semibold">Line items (₦, pre-VAT)</p><button className="text-xs text-violet-500 font-medium" onClick=${() => set('items', [...f.items, { desc: '', amount: '' }])}>+ Add line</button></div>
+      <div className="space-y-2">${f.items.map((it, i) => html`<div key=${i} className="flex gap-2"><input className=${inputCls} placeholder="Description" value=${it.desc} onChange=${e => setItem(i, 'desc', e.target.value)} /><input className=${inputCls + ' !w-36'} inputMode="numeric" placeholder="Amount" value=${it.amount} onChange=${e => setItem(i, 'amount', e.target.value)} />${f.items.length > 1 && html`<button className="text-rose-500 text-xs px-1" onClick=${() => set('items', f.items.filter((_, j) => j !== i))}>✕</button>`}</div>`)}</div>
+    </div>
+    <div className="grid sm:grid-cols-2 gap-3 mt-4">
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked=${!!f.vat} onChange=${e => set('vat', e.target.checked)} /> Charge VAT (${settings.vatRate}%)</label>
+      <${Field} label="WHT the client deducts"><${Select} value=${String(f.wht)} onChange=${v => set('wht', v)} options=${[{ v: '0', l: 'None' }, { v: '5', l: '5%' }, { v: '10', l: '10%' }]} /><//>
+      <${Field} label="Notes on invoice" className="sm:col-span-2"><${Input} value=${f.notes} onChange=${e => set('notes', e.target.value)} placeholder="e.g. 70% deposit, 30% on delivery" /><//>
+    </div>
+    <div className="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-white/5 text-sm space-y-1">
+      <div className="flex justify-between"><span className=${muted}>Subtotal</span><span>${ngn(t.sub)}</span></div>
+      <div className="flex justify-between"><span className=${muted}>VAT</span><span>${ngn(t.vat)}</span></div>
+      <div className="flex justify-between font-bold"><span>Invoice total</span><span>${ngn(t.total)}</span></div>
+      ${t.wht > 0 && html`<div className="flex justify-between text-xs"><span className=${muted}>Less WHT (credit note to collect)</span><span>−${ngn(t.wht)}</span></div><div className="flex justify-between text-xs font-semibold"><span>Expected in account</span><span>${ngn(t.net)}</span></div>`}
+    </div>
+  <//>`;
+}
+
+function invoiceText(inv, settings) {
+  const t = invTotals(inv, settings); const c = settings.company;
+  return [
+    c.name, `${c.bn} · ${c.address}`, `${c.phone} · ${c.email}`, '',
+    `INVOICE ${inv.number}`, `Issued: ${fmtDate(inv.issueDate)}   Due: ${fmtDate(inv.dueDate)}`, `Bill to: ${inv.client}${inv.clientEmail ? ' <' + inv.clientEmail + '>' : ''}`, '',
+    ...(inv.items || []).map(i => `• ${i.desc} — ${ngn(i.amount)}`), '',
+    `Subtotal: ${ngn(t.sub)}`, `VAT (${inv.vat ? settings.vatRate : 0}%): ${ngn(t.vat)}`, `TOTAL: ${ngn(t.total)}`,
+    ...(t.wht > 0 ? [`WHT (${inv.wht}%) deducted by client: ${ngn(t.wht)} — please send the credit note`, `Amount payable: ${ngn(t.net)}`] : []), '',
+    `Payment: ${c.payment}`, inv.notes ? `Notes: ${inv.notes}` : '', 'Thank you for your business.',
+  ].filter(x => x !== null).join('\n');
+}
+
+function PaidModal({ inv, store, toast, onClose }) {
+  const { settings, add, update } = store;
+  const t = invTotals(inv, settings);
+  const [f, setF] = useState({ date: localDate(), method: settings.company.payment || 'Moniepoint', currency: 'NGN', amount: String(Math.round(t.net)), fx: '' });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const rate = f.currency === 'NGN' ? 1 : (num(f.fx) || num(settings.fx[f.currency]));
+  const ngnVal = num(f.amount) * rate;
+  const save = async () => {
+    await add('ledger', { type: 'income', brand: inv.brand, amount: num(f.amount), currency: f.currency, fx: rate, ngn: ngnVal, method: f.method, date: f.date, note: `${inv.number} — ${inv.client}`, invoiceId: inv.id, offerId: inv.offerId || '' });
+    await update('invoices', inv.id, { status: 'paid', paidDate: f.date, paidNgn: ngnVal });
+    toast(`${inv.number} marked paid · ${ngn(ngnVal)} logged`); onClose();
+  };
+  return html`<${Modal} title=${'Record payment · ' + inv.number} onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} kind="good" disabled=${!(ngnVal > 0)} onClick=${save}>Mark paid</${Btn}>`}>
+    <div className="grid grid-cols-2 gap-3">
+      <${Field} label="Date received"><${Input} type="date" value=${f.date} onChange=${e => set('date', e.target.value)} /><//>
+      <${Field} label="Method"><${Select} value=${f.method} onChange=${v => set('method', v)} options=${METHODS} /><//>
+      <${Field} label="Currency received"><${Select} value=${f.currency} onChange=${v => set('currency', v)} options=${CURRENCIES} /><//>
+      <${Field} label="Amount received"><${Input} inputMode="decimal" value=${f.amount} onChange=${e => set('amount', e.target.value)} /><//>
+      ${f.currency !== 'NGN' && html`<${Field} label=${`Rate used (₦ per 1 ${f.currency})`} className="col-span-2" hint="Enter the rate you actually got — this is what converts it into NGN revenue."><${Input} inputMode="decimal" value=${f.fx || (num(settings.fx[f.currency]) || '')} onChange=${e => set('fx', e.target.value)} /><//>`}
+    </div>
+    <p className="mt-4 text-sm">Logs <span className="font-bold">${ngn(ngnVal)}</span> to ${brandOf(inv.brand).short} revenue.${t.wht > 0 ? ` Remember to collect the ${ngn(t.wht)} WHT credit note.` : ''}</p>
+  <//>`;
+}
+
+function LedgerModal({ store, toast, onClose }) {
+  const { settings, add, data } = store;
+  const [f, setF] = useState({ type: 'income', brand: 'smc', amount: '', currency: 'NGN', fx: '', method: 'Moniepoint', date: localDate(), note: '', offerId: '' });
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const rate = f.currency === 'NGN' ? 1 : (num(f.fx) || num(settings.fx[f.currency]));
+  const ngnVal = num(f.amount) * rate;
+  const save = async () => { await add('ledger', { ...f, amount: num(f.amount), fx: rate, ngn: ngnVal }); toast('Entry logged'); onClose(); };
+  return html`<${Modal} title="Log money in / out" onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} disabled=${!(ngnVal > 0)} onClick=${save}>Save entry</${Btn}>`}>
+    <div className="grid grid-cols-2 gap-3">
+      <${Field} label="Type"><${Select} value=${f.type} onChange=${v => set('type', v)} options=${[{ v: 'income', l: 'Money in' }, { v: 'expense', l: 'Money out' }]} /><//>
+      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${v => set('brand', v)} options=${brandOptions} /><//>
+      <${Field} label="Amount"><${Input} inputMode="decimal" value=${f.amount} onChange=${e => set('amount', e.target.value)} /><//>
+      <${Field} label="Currency"><${Select} value=${f.currency} onChange=${v => set('currency', v)} options=${CURRENCIES} /><//>
+      ${f.currency !== 'NGN' && html`<${Field} label=${`Rate (₦ per 1 ${f.currency})`} className="col-span-2"><${Input} inputMode="decimal" value=${f.fx || (num(settings.fx[f.currency]) || '')} onChange=${e => set('fx', e.target.value)} /><//>`}
+      <${Field} label="Method / platform"><${Select} value=${f.method} onChange=${v => set('method', v)} options=${METHODS} /><//>
+      <${Field} label="Date"><${Input} type="date" value=${f.date} onChange=${e => set('date', e.target.value)} /><//>
+      ${f.type === 'income' && html`<${Field} label="From offer" className="col-span-2"><${Select} value=${f.offerId} onChange=${v => set('offerId', v)} options=${[{ v: '', l: '— none —' }, ...data.offers.filter(o => o.brand === f.brand).map(o => ({ v: o.id, l: o.name }))]} /><//>`}
+      <${Field} label="Note" className="col-span-2"><${Input} value=${f.note} onChange=${e => set('note', e.target.value)} placeholder="e.g. Selar sale — Supernova Toolkit" /><//>
+    </div>
+    <p className="mt-4 text-sm">Converted: <span className="font-bold">${ngn(ngnVal)}</span></p>
+  <//>`;
+}
+
+function MoneyView({ store, toast, openInvoice }) {
+  const { data, settings, update, remove } = store;
+  const [sub, setSub] = useState('invoices');
+  const [paying, setPaying] = useState(null);
+  const [text, setText] = useState(null);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [period, setPeriod] = useState('h2');
+  const [ledgerBrand, setLedgerBrand] = useState('all');
+  const s = useMemo(() => computeSnapshot(data, settings, period), [data, settings, period]);
+  const invoices = [...data.invoices].sort((a, b) => String(b.issueDate).localeCompare(String(a.issueDate)));
+  const ledger = data.ledger.filter(l => ledgerBrand === 'all' || l.brand === ledgerBrand).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const paidInPeriod = data.invoices.filter(i => i.status === 'paid' && inPeriod(i.paidDate, period));
+  const vatCollected = paidInPeriod.reduce((a, i) => a + invTotals(i, settings).vat, 0);
+  const whtCredits = paidInPeriod.reduce((a, i) => a + invTotals(i, settings).wht, 0);
+  const allocTotal = settings.alloc.reduce((a, b) => a + num(b.pct), 0);
+  const allocBase = Math.max(0, s.net - vatCollected);
+
+  const copy = async t => { try { await navigator.clipboard.writeText(t); toast('Copied'); } catch (e) { toast('Copy blocked — select the text and copy it manually'); } };
+
+  return html`<div className="space-y-5">
+    <${Section} title="Money" sub="Invoice it, collect it, convert it, allocate it." action=${html`<${Chips} value=${sub} onChange=${setSub} options=${[{ v: 'invoices', l: 'Invoices' }, { v: 'ledger', l: 'Ledger' }, { v: 'alloc', l: 'Allocate & tax' }]} />`} />
+
+    ${sub === 'invoices' && html`<div className="space-y-3">
+      <div className="flex justify-between items-center"><p className=${'text-sm ' + muted}>${ngn(s.outstanding)} outstanding across ${s.openInvoices} invoice${s.openInvoices === 1 ? '' : 's'}</p><${Btn} small onClick=${() => openInvoice(null)}>+ Invoice</${Btn}></div>
+      ${invoices.length === 0 ? html`<${Card}><${Empty} title="No invoices yet">Win a deal in the pipeline or tap + Invoice.<//><//>` : invoices.map(inv => {
+        const st = invStatus(inv); const t = invTotals(inv, settings);
+        return html`<${Card} key=${inv.id}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0"><p className="font-semibold text-sm truncate">${inv.number}</p><p className=${'text-xs ' + muted}>${inv.client} · due ${fmtDate(inv.dueDate)}</p><div className="flex gap-1.5 mt-1"><${BrandChip} id=${inv.brand} /><${Pill} tone=${st === 'paid' ? 'green' : st === 'overdue' ? 'red' : st === 'sent' ? 'blue' : 'slate'}>${st}</${Pill}></div></div>
+            <div className="text-right shrink-0"><p className="font-bold">${ngn(t.total)}</p>${t.wht > 0 && html`<p className=${'text-[11px] ' + muted}>net ${ngn(t.net)}</p>`}${inv.vat && html`<p className=${'text-[11px] ' + muted}>incl. VAT ${ngn(t.vat)}</p>`}</div>
+          </div>
+          <div className="flex gap-2 mt-3 flex-wrap">
+            ${st === 'draft' && html`<${Btn} small onClick=${() => update('invoices', inv.id, { status: 'sent' })}>Mark sent</${Btn}>`}
+            ${st !== 'paid' && html`<${Btn} small kind="good" onClick=${() => setPaying(inv)}>Mark paid</${Btn}>`}
+            <${Btn} small kind="ghost" onClick=${() => setText(invoiceText(inv, settings))}>Invoice text</${Btn}>
+            <${Btn} small kind="ghost" onClick=${() => openInvoice(inv)}>Edit</${Btn}>
+            ${st !== 'paid' && html`<${Btn} small kind="danger" onClick=${() => remove('invoices', inv.id)}>Delete</${Btn}>`}
+          </div>
+        <//>`;
+      })}
+    </div>`}
+
+    ${sub === 'ledger' && html`<div className="space-y-3">
+      <div className="flex justify-between items-center gap-2"><${Chips} value=${ledgerBrand} onChange=${setLedgerBrand} options=${[{ v: 'all', l: 'All' }, ...BRANDS.map(b => ({ v: b.id, l: b.short }))]} /><${Btn} small onClick=${() => setLedgerOpen(true)}>+ Entry</${Btn}></div>
+      <${Card} className="!p-0 overflow-hidden">
+        ${ledger.length === 0 ? html`<${Empty} title="Ledger is empty">Paid invoices land here automatically. Log Selar, Spreadshop or gig cash with + Entry.<//>` : ledger.map(l => html`<div key=${l.id} className="flex items-center justify-between gap-2 px-4 py-3 border-b last:border-0 border-slate-100 dark:border-white/5">
+          <div className="min-w-0"><p className="text-sm font-medium truncate">${l.note || l.method}</p><p className=${'text-[11px] ' + muted}>${fmtDate(l.date)} · ${brandOf(l.brand).short} · ${l.method}${l.currency !== 'NGN' ? ` · ${l.currency} ${num(l.amount).toLocaleString()} @ ₦${num(l.fx).toLocaleString()}` : ''}</p></div>
+          <div className="flex items-center gap-2 shrink-0"><span className=${'font-semibold text-sm ' + (l.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>${l.type === 'income' ? '+' : '−'}${ngn(l.ngn)}</span>${!l.invoiceId && html`<button className="text-xs text-rose-500" onClick=${() => remove('ledger', l.id)}>✕</button>`}</div>
+        </div>`)}
+      <//>
+    </div>`}
+
+    ${sub === 'alloc' && html`<div className="space-y-4">
+      <${Chips} value=${period} onChange=${setPeriod} options=${Object.entries(PERIODS).map(([v, p]) => ({ v, l: p.label }))} />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <${Stat} label="Collected" value=${ngnShort(s.income)} grad="from-emerald-500 to-teal-600" />
+        <${Stat} label="Costs" value=${ngnShort(s.expenses)} grad="from-rose-500 to-pink-600" />
+        <${Stat} label="VAT to remit" value=${ngnShort(vatCollected)} sub="Collected on paid invoices" grad="from-amber-500 to-orange-600" />
+        <${Stat} label="WHT credits" value=${ngnShort(whtCredits)} sub="Credit notes to collect" grad="from-sky-500 to-blue-600" />
+      </div>
+      <${Card}>
+        <div className="flex justify-between items-center mb-3"><p className="font-semibold text-sm">Allocate ${ngn(allocBase)}</p><span className=${'text-[11px] ' + muted}>Net collected minus VAT owed</span></div>
+        ${allocTotal !== 100 && html`<p className="text-xs text-amber-600 dark:text-amber-400 mb-2">Your buckets add up to ${allocTotal}% — adjust them in Setup.</p>`}
+        <div className="space-y-2">${settings.alloc.map((a, i) => html`<div key=${i} className="flex items-center gap-3"><span className="w-32 sm:w-40 text-sm truncate">${a.name}</span><div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-white/10 overflow-hidden"><div className="h-full bg-gradient-to-r from-violet-600 to-fuchsia-500" style=${{ width: Math.min(100, num(a.pct)) + '%' }}></div></div><span className=${'w-10 text-right text-xs ' + muted}>${num(a.pct)}%</span><span className="w-28 text-right text-sm font-semibold">${ngn(allocBase * num(a.pct) / 100)}</span></div>`)}</div>
+      <//>
+      <${Card} className="!p-0 overflow-hidden">
+        <div className="px-4 py-3 font-semibold text-sm border-b border-slate-100 dark:border-white/5">Brand P&L · ${s.period}</div>
+        ${s.byBrand.map(b => html`<div key=${b.id} className="grid grid-cols-4 gap-2 px-4 py-2.5 text-sm border-b last:border-0 border-slate-100 dark:border-white/5"><span className="truncate">${b.name}</span><span className="text-right text-emerald-600 dark:text-emerald-400">${ngnShort(b.income)}</span><span className="text-right text-rose-600 dark:text-rose-400">${ngnShort(b.expenses)}</span><span className="text-right font-semibold">${ngnShort(b.income - b.expenses)}</span></div>`)}
+      <//>
+      <p className=${'text-[11px] ' + muted}>Tax figures are working estimates from your own records, not filing advice — confirm with your accountant before remitting.</p>
+    </div>`}
+
+    ${paying && html`<${PaidModal} inv=${paying} store=${store} toast=${toast} onClose=${() => setPaying(null)} />`}
+    ${ledgerOpen && html`<${LedgerModal} store=${store} toast=${toast} onClose=${() => setLedgerOpen(false)} />`}
+    ${text && html`<${Modal} title="Invoice text" onClose=${() => setText(null)} footer=${html`<${Btn} onClick=${() => copy(text)}>Copy</${Btn}>`}><textarea readOnly rows="16" className=${inputCls + ' font-mono text-xs'} value=${text} onFocus=${e => e.target.select()}></textarea><//>`}
+  </div>`;
+}
+
+/* ---------------- Google Workspace ---------------- */
+function parseSender(s) {
+  if (!s) return { name: '', email: '' };
+  if (typeof s === 'object') return { name: s.displayName || s.name || s.email || '', email: s.email || s.emailAddress || '' };
+  const m = String(s).match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>/);
+  if (m) return { name: m[1] || m[2], email: m[2] };
+  return { name: s, email: String(s).includes('@') ? s : '' };
+}
+function parseThreads(p) {
+  const arr = (p && (p.threads || p.items)) || (Array.isArray(p) ? p : []);
+  return arr.map(t => {
+    const msgs = t.messages || [];
+    const first = msgs[0] || {}; const last = msgs[msgs.length - 1] || first;
+    return { id: t.id, subject: first.subject || last.subject || t.subject || '(no subject)', from: parseSender(last.sender || first.sender || t.sender), date: last.date || first.date || '', snippet: last.snippet || first.snippet || t.snippet || '', url: t.viewUrl || last.viewUrl || first.viewUrl || '' };
+  });
+}
+function parseEvents(p) {
+  const arr = (p && (p.events || p.items)) || (Array.isArray(p) ? p : []);
+  return arr.map(e => {
+    const st = e.start || e.startTime; const start = typeof st === 'object' && st ? (st.dateTime || st.date) : st;
+    return { id: e.id || uid(), title: e.summary || '(untitled)', start, location: e.location || '', url: e.htmlLink || e.viewUrl || '', meet: e.hangoutLink || e.googleMeetUrl || '' };
+  });
+}
+const RADAR = [
+  { v: 'leads', l: 'Leads', q: '(booking OR enquiry OR inquiry OR quote OR proposal OR availability OR rates) newer_than:30d -in:sent -category:promotions' },
+  { v: 'pay', l: 'Payments', q: '(Moniepoint OR Paystack OR Flutterwave OR "payment received" OR credited OR Selar OR Gumroad) newer_than:30d' },
+  { v: 'inv', l: 'Invoices', q: '"INV-SMC" newer_than:90d' },
+  { v: 'custom', l: 'Custom', q: '' },
+];
+
+function WorkspaceView({ caps, toast, openDeal }) {
+  const [radar, setRadar] = useState('leads');
+  const [custom, setCustom] = useState('');
+  const [mail, setMail] = useState({ state: 'idle', items: [], error: '' });
+  const [cal, setCal] = useState({ state: 'idle', items: [], error: '' });
+  const [booking, setBooking] = useState(null);
+
+  const loadMail = async () => {
+    if (!caps.mcp) return;
+    const q = radar === 'custom' ? custom : RADAR.find(r => r.v === radar).q;
+    setMail(m => ({ ...m, state: 'loading', error: '' }));
+    const res = await mcpCall(caps.mcp, 'Gmail', 'search_threads', { query: q, pageSize: 15, view: 'THREAD_VIEW_SUMMARY' });
+    if (res.ok) setMail({ state: 'ok', items: parseThreads(res.payload), error: '' });
+    else setMail({ state: 'error', items: ['needs_reauth', 'server_not_connected', 'not_in_manifest', 'blocked_by_policy'].includes(res.code) ? [] : mail.items, error: res.error });
+  };
+  const loadCal = async () => {
+    if (!caps.mcp) return;
+    setCal(c => ({ ...c, state: 'loading', error: '' }));
+    const res = await mcpCall(caps.mcp, 'Google Calendar', 'list_events', { orderBy: 'startTime', pageSize: 12 });
+    if (res.ok) setCal({ state: 'ok', items: parseEvents(res.payload), error: '' });
+    else setCal({ state: 'error', items: ['needs_reauth', 'server_not_connected', 'not_in_manifest', 'blocked_by_policy'].includes(res.code) ? [] : cal.items, error: res.error });
+  };
+
+  if (caps.mcp === null) return html`<${Section} title="Google Workspace" sub="Gmail lead radar and Calendar booking."><${Card}><${Empty} title="Not connected in the standalone app">Gmail and Calendar run through claude.ai connectors. Open the Soulvee OS page on claude.ai with Gmail and Google Calendar connected to scan your inbox for leads and payments and book calls straight from deals.<//><//><//>`;
+
+  return html`<div className="space-y-5">
+    <${Section} title="Google Workspace" sub="Scan Gmail for money signals and run your calendar from here. Nothing is sent without you." />
+    <${Card}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap"><p className="font-semibold text-sm">✉ Gmail radar</p><${Btn} small onClick=${loadMail} disabled=${mail.state === 'loading' || (radar === 'custom' && !custom.trim())}>${mail.state === 'loading' ? 'Scanning…' : mail.state === 'idle' ? 'Scan inbox' : 'Rescan'}</${Btn}></div>
+      <${Chips} value=${radar} onChange=${setRadar} options=${RADAR.map(r => ({ v: r.v, l: r.l }))} />
+      ${radar === 'custom' && html`<div className="mt-2"><${Input} value=${custom} onChange=${e => setCustom(e.target.value)} placeholder='Gmail search, e.g. from:flaky OR "Su Chau"' /></div>`}
+      ${mail.error && html`<p className="text-sm text-rose-600 dark:text-rose-400 mt-3">${mail.error}</p>`}
+      <div className="mt-3 space-y-2">
+        ${mail.state === 'idle' && html`<p className=${'text-xs ' + muted}>Pick a radar and scan. The first scan asks you to allow Gmail for this page.</p>`}
+        ${mail.state === 'ok' && mail.items.length === 0 && html`<${Empty} title="Nothing matched">Try another radar or a custom search.<//>`}
+        ${mail.items.map(t => html`<div key=${t.id} className="p-3 rounded-xl bg-slate-50 dark:bg-white/5">
+          <div className="flex justify-between gap-2"><p className="text-sm font-medium truncate">${t.subject}</p><span className=${'text-[11px] shrink-0 ' + muted}>${fmtDateTime(t.date)}</span></div>
+          <p className=${'text-xs ' + muted}>${t.from.name}${t.from.email && t.from.email !== t.from.name ? ' · ' + t.from.email : ''}</p>
+          <p className="text-xs mt-1 line-clamp-2">${t.snippet}</p>
+          <div className="flex gap-2 mt-2">
+            <${Btn} small onClick=${() => openDeal({ client: t.from.name, email: t.from.email, source: 'Email', stage: 'lead', notes: t.subject })}>Add as lead</${Btn}>
+            ${t.url && html`<a href=${t.url} target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Open in Gmail</a>`}
+          </div>
+        </div>`)}
+      </div>
+    <//>
+    <${Card}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap"><p className="font-semibold text-sm">📅 Next 7 days</p><div className="flex gap-2"><${Btn} small kind="ghost" onClick=${() => setBooking({ summary: '' })}>+ Event</${Btn}><${Btn} small onClick=${loadCal} disabled=${cal.state === 'loading'}>${cal.state === 'loading' ? 'Loading…' : cal.state === 'idle' ? 'Load calendar' : 'Refresh'}</${Btn}></div></div>
+      ${cal.error && html`<p className="text-sm text-rose-600 dark:text-rose-400 mb-2">${cal.error}</p>`}
+      ${cal.state === 'idle' && html`<p className=${'text-xs ' + muted}>Load to see gigs, calls and deadlines. The first load asks you to allow Google Calendar.</p>`}
+      ${cal.state === 'ok' && cal.items.length === 0 && html`<${Empty} title="Clear week">No events in the next 7 days.<//>`}
+      <div className="space-y-2">${cal.items.map(e => html`<div key=${e.id} className="flex items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 dark:bg-white/5"><div className="min-w-0"><p className="text-sm font-medium truncate">${e.title}</p><p className=${'text-[11px] ' + muted}>${fmtDateTime(e.start)}${e.location ? ' · ' + e.location : ''}</p></div>${(e.meet || e.url) && html`<a href=${e.meet || e.url} target="_blank" rel="noopener" className="text-xs text-violet-500 font-medium shrink-0">${e.meet ? 'Join' : 'Open'}</a>`}</div>`)}</div>
+    <//>
+    ${booking && html`<${CalendarModal} prefill=${booking} caps=${caps} toast=${toast} onClose=${() => { setBooking(null); if (cal.state === 'ok') loadCal(); }} />`}
+  </div>`;
+}
+
+/* ---------------- AI sub-agent ---------------- */
+function AssistantView({ store, caps, toast }) {
+  const ref = useRef(store); ref.current = store;
+  const [voice, setVoice] = useState('dj');
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [acts, setActs] = useState([]);
+  const endRef = useRef(null);
+  const abortRef = useRef(null);
+  useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [msgs]);
+
+  const tools = [
+    { name: 'get_revenue_snapshot', description: 'Collected revenue, costs, outstanding invoices, weighted pipeline and H2 target progress, all in NGN.', inputSchema: { type: 'object', properties: { period: { type: 'string', enum: ['h2', 'year', 'all'] } } },
+      execute: ({ period } = {}) => { const s = computeSnapshot(ref.current.data, ref.current.settings, period || 'h2'); return { ...s, overdue: s.overdue.map(i => ({ number: i.number, client: i.client, due: i.dueDate })) }; } },
+    { name: 'list_deals', description: 'Pipeline deals with client, brand, stage, value (NGN), next step and due date.', inputSchema: { type: 'object', properties: { stage: { type: 'string', description: 'lead, qualified, proposal, negotiation, won, lost, or open' } } },
+      execute: ({ stage } = {}) => ref.current.data.deals.filter(d => !stage || (stage === 'open' ? !['won', 'lost'].includes(d.stage) : d.stage === stage)).slice(0, 40).map(d => ({ client: d.client, brand: brandOf(d.brand).name, stage: d.stage, value: d.value, nextStep: d.nextStep, nextDue: d.nextDue, source: d.source })) },
+    { name: 'list_invoices', description: 'Invoices with number, client, status (draft, sent, overdue, paid) and NGN totals.', inputSchema: { type: 'object', properties: {} },
+      execute: () => ref.current.data.invoices.slice(0, 40).map(i => { const t = invTotals(i, ref.current.settings); return { number: i.number, client: i.client, status: invStatus(i), total: t.total, net: t.net, due: i.dueDate }; }) },
+    { name: 'list_offers', description: 'The offer catalogue: name, brand, status, model and price tiers in NGN.', inputSchema: { type: 'object', properties: { brand: { type: 'string', enum: BRANDS.map(b => b.id) } } },
+      execute: ({ brand } = {}) => ref.current.data.offers.filter(o => !brand || o.brand === brand).map(o => ({ name: o.name, brand: brandOf(o.brand).name, status: o.status, model: o.model, tiers: (o.tiers || []).map(t => ({ name: t.name, price: t.price })) })) },
+    { name: 'create_deal', description: 'Add a deal to the pipeline. Use only when Soulvee asks you to add or log a lead/deal.', inputSchema: { type: 'object', required: ['client', 'brand'], properties: { client: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, value: { type: 'number' }, stage: { type: 'string', enum: STAGES.map(s => s.id) }, nextStep: { type: 'string' }, source: { type: 'string' }, email: { type: 'string' } } },
+      execute: async a => { const st = a.stage || 'lead'; await ref.current.add('deals', { client: a.client, brand: a.brand, value: num(a.value), stage: st, prob: stageOf(st).p, nextStep: a.nextStep || '', source: a.source || 'Direct', email: a.email || '', offerId: '', notes: 'Added by assistant' }); setActs(x => [...x, `Added deal: ${a.client}`]); return { ok: true }; } },
+    { name: 'create_offer', description: 'Save a new offer to the catalogue as status "packaging". Use only when Soulvee asks to save or create an offer.', inputSchema: { type: 'object', required: ['name', 'brand'], properties: { name: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, pitch: { type: 'string' }, model: { type: 'string', enum: MODELS }, tiers: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, price: { type: 'number' }, deliverables: { type: 'array', items: { type: 'string' } } } } } } },
+      execute: async a => { await ref.current.add('offers', { name: a.name, brand: a.brand, pitch: a.pitch || '', model: a.model || 'project', status: 'packaging', channels: [], firstMove: '', tiers: (a.tiers || []).map(t => ({ name: t.name || '', price: num(t.price), deliverables: t.deliverables || [], suggested: true })) }); setActs(x => [...x, `Saved offer: ${a.name}`]); return { ok: true }; } },
+    { name: 'create_draft_invoice', description: 'Create a DRAFT invoice (never sent or marked paid). Use only when Soulvee asks for an invoice.', inputSchema: { type: 'object', required: ['client', 'brand', 'items'], properties: { client: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, vat: { type: 'boolean' }, items: { type: 'array', items: { type: 'object', properties: { desc: { type: 'string' }, amount: { type: 'number' } } } } } },
+      execute: async a => { const st = ref.current.settings; const number = invNumber(a.client, st.invoiceSeq); await ref.current.add('invoices', { number, client: a.client, clientEmail: '', brand: a.brand, items: (a.items || []).map(i => ({ desc: i.desc || '', amount: num(i.amount) })), vat: a.vat !== false, wht: 0, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft', offerId: '', dealId: '' }); await ref.current.saveSettings({ ...st, invoiceSeq: num(st.invoiceSeq) + 1 }); setActs(x => [...x, `Drafted invoice ${number}`]); return { ok: true, number }; } },
+  ];
+
+  const preamble = () => `${voiceFor(voice)}
+You are also Soulvee's operations sub-agent inside Soulvee OS, the Soulveetainment Media Consults control unit, which runs four brands (DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emporium, EFR) plus digital products. Philosophy: systems over hustle.
+Today is ${fmtDate(localDate())}, Lagos. Money is NGN-first; format like ₦1,500,000. Lead with decisions and numbers, keep it skimmable.
+Use the tools to read real figures before answering money or pipeline questions — never invent numbers. Only create deals, offers or draft invoices when explicitly asked. When asked to reply to a client or fan message, write the reply in the brand voice above, ready to paste, and don't invent prices or dates that aren't in the catalogue or the message.
+Plain text with short lines; simple dashes for lists; no markdown headers or tables.`;
+
+  const send = async text => {
+    const q = (text || input).trim();
+    if (!q || !caps.sample || busy) return;
+    const history = [...msgs, { role: 'user', content: q }];
+    setMsgs([...history, { role: 'assistant', content: '' }]); setInput(''); setBusy(true); setActs([]);
+    const ctl = new AbortController(); abortRef.current = ctl;
+    try {
+      const payload = history.map((m, i) => i === 0 ? { role: 'user', content: preamble() + '\n\n---\n' + m.content } : m);
+      const r = await caps.sample(payload, { tools, cache: false, signal: ctl.signal, onText: ({ text }) => setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: text }; return c; }) });
+      setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: (r.text || '').trim() || '(no answer)' }; return c; });
+    } catch (e) {
+      const t = e && e.text ? e.text : sampleMessage(e);
+      setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: t }; return c; });
+    }
+    setBusy(false); abortRef.current = null;
+  };
+  const copy = async t => { try { await navigator.clipboard.writeText(t); toast('Copied'); } catch (e) { toast('Copy blocked — long-press to copy'); } };
+
+  if (caps.sample === null) return html`<${Section} title="AI sub-agent"><${Card}><${Empty} title="AI is off">Set ANTHROPIC_API_KEY on the Soulvee OS server (see README), then reload.<//><//><//>`;
+
+  const prompts = ['Where is my revenue this H2 — what should I chase first?', 'Which deals need a follow-up this week?', 'Draft a reply to a fan asking how to book DJ Soulvee for a December wedding', 'Turn my Google Workspace automation skill into an offer and save it'];
+  return html`<div className="space-y-4">
+    <${Section} title="AI sub-agent" sub="Reads your live numbers, drafts replies in your voice, and logs deals, offers and draft invoices when you ask." action=${html`<div className="w-44"><${Select} value=${voice} onChange=${setVoice} options=${[{ v: 'dj', l: 'Voice: DJ Soulvee' }, { v: 'smc', l: 'Voice: SMC' }, { v: 'emporium', l: 'Voice: Emporium' }]} /></div>`} />
+    <${Card} className="!p-0 overflow-hidden">
+      <div className="h-[52vh] sm:h-[56vh] overflow-y-auto p-4 space-y-3">
+        ${msgs.length === 0 && html`<div className="space-y-2"><p className=${'text-sm ' + muted}>Try one:</p>${prompts.map(p => html`<button key=${p} onClick=${() => send(p)} className="block w-full text-left text-sm p-3 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10">${p}</button>`)}</div>`}
+        ${msgs.map((m, i) => html`<div key=${i} className=${'flex ' + (m.role === 'user' ? 'justify-end' : 'justify-start')}>
+          <div className=${'max-w-[88%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ' + (m.role === 'user' ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white' : 'bg-slate-100 dark:bg-white/10')}>
+            ${m.content || (busy && i === msgs.length - 1 ? html`<span className=${muted}>Thinking…</span>` : '')}
+            ${m.role === 'assistant' && m.content && !(busy && i === msgs.length - 1) && html`<div className="mt-2"><button onClick=${() => copy(m.content)} className="text-[11px] font-medium text-violet-600 dark:text-violet-300">Copy</button></div>`}
+          </div>
+        </div>`)}
+        ${acts.length > 0 && html`<div className="text-[11px] text-emerald-600 dark:text-emerald-400">${acts.map((a, i) => html`<p key=${i}>✓ ${a}</p>`)}</div>`}
+        <div ref=${endRef}></div>
+      </div>
+      <form className="flex gap-2 p-3 border-t border-slate-100 dark:border-white/10" onSubmit=${e => { e.preventDefault(); send(); }}>
+        <input className=${inputCls} value=${input} onChange=${e => setInput(e.target.value)} placeholder="Ask about money, deals, or paste a message to reply to…" />
+        ${busy ? html`<${Btn} type="button" kind="ghost" onClick=${() => abortRef.current && abortRef.current.abort()}>Stop</${Btn}>` : html`<${Btn} type="submit" disabled=${!input.trim()}>Send</${Btn}>`}
+      </form>
+    <//>
+    ${msgs.length > 0 && !busy && html`<button className=${'text-xs ' + muted} onClick=${() => setMsgs([])}>Clear conversation</button>`}
+  </div>`;
+}
+
+/* ---------------- Learn ---------------- */
+function TrackModal({ track, offers, onClose, onSave }) {
+  const [f, setF] = useState(() => ({ title: '', brand: 'smc', level: 0, goal: '', offerId: '', notes: '', ...(track || {}) }));
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  return html`<${Modal} title=${track && track.id ? 'Edit track' : 'New learning track'} onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} disabled=${!String(f.title).trim()} onClick=${() => onSave({ ...f, level: Math.max(0, Math.min(5, num(f.level))) })}>Save</${Btn}>`}>
+    <div className="grid grid-cols-2 gap-3">
+      <${Field} label="Skill to learn" className="col-span-2"><${Input} value=${f.title} onChange=${e => set('title', e.target.value)} placeholder="e.g. Building MCP servers" /><//>
+      <${Field} label="Brand it earns for"><${Select} value=${f.brand} onChange=${v => set('brand', v)} options=${brandOptions} /><//>
+      <${Field} label="Levels done (0–5)"><${Input} inputMode="numeric" value=${f.level} onChange=${e => set('level', e.target.value)} /><//>
+      <${Field} label="Unlocks offer" className="col-span-2"><${Select} value=${f.offerId} onChange=${v => set('offerId', v)} options=${[{ v: '', l: '— none —' }, ...offers.map(o => ({ v: o.id, l: o.name }))]} /><//>
+      <${Field} label="Goal" className="col-span-2"><${Input} value=${f.goal} onChange=${e => set('goal', e.target.value)} placeholder="What being good at this lets you sell" /><//>
+      <${Field} label="Notes" className="col-span-2"><${Area} rows="2" value=${f.notes} onChange=${e => set('notes', e.target.value)} /><//>
+    </div>
+  <//>`;
+}
+
+function LearnView({ store, caps, toast }) {
+  const { data, add, update, remove } = store;
+  const [editing, setEditing] = useState(null);
+  const [lesson, setLesson] = useState(null);
+  const offerOf = id => data.offers.find(o => o.id === id);
+  const tracks = [...data.learning].sort((a, b) => num(a.level) - num(b.level));
+
+  const teach = async t => {
+    if (!caps.sample) return;
+    const o = offerOf(t.offerId); const lvl = Math.min(5, num(t.level) + 1);
+    setLesson({ track: t, level: lvl, text: '', busy: true });
+    try {
+      const r = await caps.sample(`You are a practical tutor for Soulvee, a Lagos-based solo founder (DJ, radio broadcaster, hospitality-tech and AI-automation consultant) who learns by doing and prefers systems over hustle.
+Teach Level ${lvl} of 5 in: ${t.title}.
+${t.goal ? 'His goal: ' + t.goal + '.' : ''} ${o ? `This skill powers the offer "${o.name}"${(o.tiers || []).some(x => num(x.price) > 0) ? ' priced from ' + ngn(Math.min(...o.tiers.filter(x => num(x.price) > 0).map(x => num(x.price)))) : ''}.` : ''} ${t.notes ? 'Notes so far: ' + t.notes : ''}
+Levels: 1 foundations, 2 core workflow, 3 real project, 4 client-ready delivery, 5 productise and scale. Pitch it exactly at Level ${lvl}.
+Format as plain text with these labels on their own lines: GOAL, KEY IDEAS (3-5 dashes), DO THIS NOW (one 30-60 minute hands-on task with steps), TURN IT INTO MONEY (how this level makes the offer more sellable, NGN angle), CHECK YOURSELF (3 short questions). Under 350 words. No markdown symbols.`, { cache: false, onText: ({ text }) => setLesson(l => l && { ...l, text }) });
+      setLesson(l => l && { ...l, text: (r.text || '').trim(), busy: false });
+    } catch (e) { setLesson(l => l && { ...l, text: sampleMessage(e), busy: false }); }
+  };
+
+  return html`<div className="space-y-5">
+    <${Section} title="Learn → Earn" sub="Every skill you level up is tied to an offer it makes sellable." action=${html`<${Btn} small onClick=${() => setEditing({})}>+ Track</${Btn}>`} />
+    ${tracks.length === 0 ? html`<${Card}><${Empty} title="No learning tracks yet">Add the skills you're building — MCP servers, Google Workspace automation, SambaPOS — and link each to the offer it unlocks.<//><//>` : html`<div className="grid md:grid-cols-2 gap-3">${tracks.map(t => {
+      const o = offerOf(t.offerId); const lvl = num(t.level);
+      return html`<${Card} key=${t.id}>
+        <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="font-semibold">${t.title}</p><div className="flex gap-1.5 mt-1 flex-wrap"><${BrandChip} id=${t.brand} />${lvl >= 5 ? html`<${Pill} tone="green">mastered</${Pill}>` : html`<${Pill} tone="violet">Level ${lvl}/5</${Pill}>`}</div></div></div>
+        <div className="flex gap-1 mt-3">${[1, 2, 3, 4, 5].map(n => html`<div key=${n} className=${'h-1.5 flex-1 rounded-full ' + (n <= lvl ? 'bg-gradient-to-r from-violet-600 to-fuchsia-500' : 'bg-slate-200 dark:bg-white/10')}></div>`)}</div>
+        ${t.goal && html`<p className=${'text-xs mt-2 ' + muted}>${t.goal}</p>`}
+        ${o && html`<p className="text-xs mt-1">Unlocks: <span className="font-medium">${o.name}</span></p>`}
+        <div className="flex gap-2 mt-3 flex-wrap">
+          ${lvl < 5 && caps.sample && html`<${Btn} small onClick=${() => teach(t)}>Level ${lvl + 1} lesson</${Btn}>`}
+          ${lvl < 5 && html`<${Btn} small kind="good" onClick=${() => { update('learning', t.id, { level: lvl + 1 }); toast(`${t.title}: Level ${lvl + 1} done`); }}>Mark level done</${Btn}>`}
+          <${Btn} small kind="ghost" onClick=${() => setEditing(t)}>Edit</${Btn}>
+          <${Btn} small kind="danger" onClick=${() => remove('learning', t.id)}>Delete</${Btn}>
+        </div>
+      <//>`;
+    })}</div>`}
+    ${lesson && html`<${Modal} title=${`${lesson.track.title} · Level ${lesson.level}`} wide onClose=${() => setLesson(null)} footer=${html`<${Btn} kind="ghost" onClick=${() => setLesson(null)}>Close</${Btn}>${!lesson.busy && html`<${Btn} kind="good" onClick=${() => { update('learning', lesson.track.id, { level: lesson.level }); toast('Level completed'); setLesson(null); }}>I've done it — mark Level ${lesson.level}</${Btn}>`}`}>
+      <div className="text-sm whitespace-pre-wrap leading-relaxed">${lesson.text || html`<span className=${muted}>Preparing your lesson…</span>`}</div>
+    <//>`}
+    ${editing && html`<${TrackModal} track=${editing} offers=${data.offers} onClose=${() => setEditing(null)} onSave=${async v => { if (editing.id) await update('learning', editing.id, v); else await add('learning', v); setEditing(null); toast('Track saved'); }} />`}
+  </div>`;
+}
+
+/* ---------------- Setup ---------------- */
+function SetupView({ store, caps, toast }) {
+  const { settings, saveSettings, mode, readOnly } = store;
+  const [f, setF] = useState(() => JSON.parse(JSON.stringify(settings)));
+  useEffect(() => { setF(JSON.parse(JSON.stringify(settings))); }, [settings]);
+  const setC = (k, v) => setF(p => ({ ...p, company: { ...p.company, [k]: v } }));
+  const allocTotal = f.alloc.reduce((a, b) => a + num(b.pct), 0);
+  const save = async () => { await saveSettings({ ...f, h2Target: num(f.h2Target), vatRate: num(f.vatRate), whtDefault: num(f.whtDefault), invoiceSeq: Math.max(1, num(f.invoiceSeq)), fx: { USD: num(f.fx.USD), GBP: num(f.fx.GBP), EUR: num(f.fx.EUR) }, alloc: f.alloc.map(a => ({ name: a.name, pct: num(a.pct) })) }); toast('Setup saved'); };
+  const setTheme = t => saveSettings({ ...settings, theme: t });
+
+  return html`<div className="space-y-5">
+    <${Section} title="Setup" sub="Business details, targets, rates and how money gets split." />
+    <${Card}>
+      <p className="font-semibold text-sm mb-3">Appearance</p>
+      <div className="grid grid-cols-2 gap-3 max-w-sm">${[{ v: 'dark', l: '🌙 Night' }, { v: 'light', l: '☀️ Day' }].map(o => html`<button key=${o.v} onClick=${() => setTheme(o.v)} className=${'p-4 rounded-2xl border-2 text-sm font-medium ' + (settings.theme === o.v ? 'border-violet-500 bg-violet-50 dark:bg-violet-500/10' : 'border-slate-200 dark:border-white/10')}>${o.l}</button>`)}</div>
+    <//>
+    <${Card}>
+      <p className="font-semibold text-sm mb-3">Business (shown on invoices)</p>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <${Field} label="Business name"><${Input} value=${f.company.name} onChange=${e => setC('name', e.target.value)} /><//>
+        <${Field} label="Registration"><${Input} value=${f.company.bn} onChange=${e => setC('bn', e.target.value)} /><//>
+        <${Field} label="Address" className="sm:col-span-2"><${Input} value=${f.company.address} onChange=${e => setC('address', e.target.value)} /><//>
+        <${Field} label="Phone"><${Input} value=${f.company.phone} onChange=${e => setC('phone', e.target.value)} /><//>
+        <${Field} label="Email"><${Input} value=${f.company.email} onChange=${e => setC('email', e.target.value)} /><//>
+        <${Field} label="Payment instructions" className="sm:col-span-2" hint="Printed on invoice text, e.g. bank name and account name"><${Input} value=${f.company.payment} onChange=${e => setC('payment', e.target.value)} /><//>
+      </div>
+    <//>
+    <${Card}>
+      <p className="font-semibold text-sm mb-3">Targets, tax & conversion</p>
+      <div className="grid sm:grid-cols-3 gap-3">
+        <${Field} label=${`H2 ${year} target (₦)`} className="sm:col-span-3"><${Input} inputMode="numeric" value=${f.h2Target || ''} onChange=${e => setF({ ...f, h2Target: e.target.value })} placeholder="Combined target across all brands" /><//>
+        <${Field} label="VAT rate %"><${Input} inputMode="decimal" value=${f.vatRate} onChange=${e => setF({ ...f, vatRate: e.target.value })} /><//>
+        <${Field} label="Typical WHT %"><${Input} inputMode="decimal" value=${f.whtDefault} onChange=${e => setF({ ...f, whtDefault: e.target.value })} /><//>
+        <${Field} label="Next invoice no."><${Input} inputMode="numeric" value=${f.invoiceSeq} onChange=${e => setF({ ...f, invoiceSeq: e.target.value })} /><//>
+        ${['USD', 'GBP', 'EUR'].map(c => html`<${Field} key=${c} label=${`₦ per 1 ${c}`}><${Input} inputMode="decimal" value=${f.fx[c] || ''} onChange=${e => setF({ ...f, fx: { ...f.fx, [c]: e.target.value } })} placeholder="Today's rate" /><//>`)}
+      </div>
+      <p className=${'text-[11px] mt-2 ' + muted}>Rates aren't fetched live — enter what you're actually getting. Each payment keeps the rate it was recorded at.</p>
+    <//>
+    <${Card}>
+      <div className="flex justify-between items-center mb-3"><p className="font-semibold text-sm">Allocation buckets</p><span className=${'text-xs font-semibold ' + (allocTotal === 100 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400')}>${allocTotal}%</span></div>
+      <div className="space-y-2">${f.alloc.map((a, i) => html`<div key=${i} className="flex gap-2"><input className=${inputCls} value=${a.name} onChange=${e => setF({ ...f, alloc: f.alloc.map((x, j) => j === i ? { ...x, name: e.target.value } : x) })} /><input className=${inputCls + ' !w-20'} inputMode="numeric" value=${a.pct} onChange=${e => setF({ ...f, alloc: f.alloc.map((x, j) => j === i ? { ...x, pct: e.target.value } : x) })} /><button className="text-rose-500 text-xs px-1" onClick=${() => setF({ ...f, alloc: f.alloc.filter((_, j) => j !== i) })}>✕</button></div>`)}</div>
+      <button className="text-xs text-violet-500 font-medium mt-2" onClick=${() => setF({ ...f, alloc: [...f.alloc, { name: 'New bucket', pct: 0 }] })}>+ Add bucket</button>
+    <//>
+    <${Card}>
+      <p className="font-semibold text-sm mb-1">Backup & restore</p>
+      <p className=${'text-xs mb-3 ' + muted}>Your data lives in this browser. Export a backup file to keep it safe or move it to another device.</p>
+      <div className="flex gap-2 flex-wrap">
+        <${Btn} small onClick=${() => window.SoulveeOS.exportData()}>Export backup</${Btn}>
+        <label className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium cursor-pointer">Restore from file<input type="file" accept="application/json,.json" className="hidden" onChange=${async e => { const file = e.target.files && e.target.files[0]; e.target.value = ''; if (!file) return; if (!confirm('Replace all data on this device with this backup?')) return; try { await window.SoulveeOS.importData(file); toast('Backup restored'); } catch (err) { toast('Restore failed: ' + err.message); } }} /></label>
+      </div>
+    <//>
+    <div className="flex items-center justify-between gap-3 flex-wrap">
+      <p className=${'text-[11px] ' + muted}>Storage: ${mode === 'db' ? 'saved on this device — export a backup regularly' : 'connecting…'} · AI ${caps.sample ? 'on' : 'off'} · Google ${caps.mcp ? 'ready' : 'off'}</p>
+      <${Btn} onClick=${save} disabled=${readOnly}>Save setup</${Btn}>
+    </div>
+  </div>`;
+}
+
+/* ---------------- App shell ---------------- */
+const TABS = [
+  { id: 'command', label: 'Command', icon: '◎' },
+  { id: 'skills', label: 'Skills → Revenue', icon: '✦' },
+  { id: 'pipeline', label: 'Pipeline', icon: '▤' },
+  { id: 'money', label: 'Money', icon: '₦' },
+  { id: 'workspace', label: 'Google', icon: '✉' },
+  { id: 'assistant', label: 'AI Agent', icon: '✧' },
+  { id: 'learn', label: 'Learn', icon: '◈' },
+  { id: 'setup', label: 'Setup', icon: '⚙' },
+];
+
+function App() {
+  const [toastMsg, setToastMsg] = useState(null);
+  const toastTimer = useRef(null);
+  const toast = m => { setToastMsg(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToastMsg(null), 3000); };
+  const store = useStore(toast);
+  const [tab, setTab] = useState(() => { const h = (location.hash || '').slice(1); return TABS.some(t => t.id === h) ? h : 'command'; });
+  const [caps, setCaps] = useState({ sample: undefined, mcp: undefined });
+  const [dealEdit, setDealEdit] = useState(null);
+  const [invEdit, setInvEdit] = useState(null);
+
+  useEffect(() => { document.documentElement.classList.toggle('dark', store.settings.theme !== 'light'); }, [store.settings.theme]);
+  useEffect(() => {
+    const onHash = () => { const h = (location.hash || '').slice(1); if (TABS.some(t => t.id === h)) setTab(h); };
+    window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  useEffect(() => { (async () => { const [s, m] = await Promise.all([getCap('sample'), getCap('mcp')]); setCaps({ sample: s, mcp: m }); })(); }, []);
+
+  const go = id => { setTab(id); try { history.replaceState(null, '', '#' + id); } catch (e) { location.hash = id; } window.scrollTo({ top: 0 }); };
+  const openDeal = d => setDealEdit(d || {});
+  const openInvoice = (inv, deal) => setInvEdit({ inv: inv || null, deal: deal || null });
+  const startDeal = o => { const t = (o.tiers || []).find(t => num(t.price) > 0); setDealEdit({ brand: o.brand, offerId: o.id, value: t ? t.price : '', stage: 'lead', nextStep: o.firstMove || '' }); };
+  const saveDeal = async v => { if (dealEdit && dealEdit.id) await store.update('deals', dealEdit.id, v); else await store.add('deals', v); setDealEdit(null); toast('Deal saved'); };
+
+  const dark = store.settings.theme !== 'light';
+  const view = {
+    command: html`<${CommandView} store=${store} go=${go} openDeal=${openDeal} openInvoice=${openInvoice} />`,
+    skills: html`<${SkillsView} store=${store} caps=${caps} toast=${toast} startDeal=${startDeal} />`,
+    pipeline: html`<${PipelineView} store=${store} caps=${caps} toast=${toast} openDeal=${openDeal} openInvoice=${openInvoice} />`,
+    money: html`<${MoneyView} store=${store} toast=${toast} openInvoice=${openInvoice} />`,
+    workspace: html`<${WorkspaceView} caps=${caps} toast=${toast} openDeal=${openDeal} />`,
+    assistant: html`<${AssistantView} store=${store} caps=${caps} toast=${toast} />`,
+    learn: html`<${LearnView} store=${store} caps=${caps} toast=${toast} />`,
+    setup: html`<${SetupView} store=${store} caps=${caps} toast=${toast} />`,
+  }[tab];
+
+  const shellBg = 'min-h-screen ' + (dark ? 'bg-[radial-gradient(ellipse_at_top,_#2a1450_0%,_#0b0715_55%)]' : 'bg-[radial-gradient(ellipse_at_top,_#ede9fe_0%,_#f8fafc_55%)]');
+  return html`<div className=${shellBg}>
+    <header className="sticky top-0 z-40 backdrop-blur-xl border-b bg-white/75 border-slate-200 dark:bg-[#0b0715]/75 dark:border-white/10">
+      <div className="max-w-6xl mx-auto px-4 pt-3 pb-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center text-white font-extrabold glow shrink-0">S</div>
+            <div className="min-w-0"><p className="text-[10px] uppercase tracking-[0.18em] font-bold text-violet-600 dark:text-violet-300">Soulveetainment Media Consults</p><h1 className="text-base sm:text-lg font-extrabold tracking-tight truncate">Soulvee OS</h1></div>
+          </div>
+          <div className="flex items-center gap-2">
+            ${store.mode === 'local' && html`<span className="hidden sm:inline text-[11px] px-2 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">Not saving</span>`}
+            ${store.stale && html`<span className="text-[11px] px-2 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">Reconnecting…</span>`}
+            <button onClick=${() => store.saveSettings({ ...store.settings, theme: dark ? 'light' : 'dark' })} className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/10 text-lg" aria-label="Toggle day and night mode">${dark ? '☀️' : '🌙'}</button>
+          </div>
+        </div>
+        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${TABS.map(t => html`<button key=${t.id} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}</button>`)}</nav>
+      </div>
+    </header>
+    <main className="max-w-6xl mx-auto px-4 py-5 pb-24">
+      ${store.mode === 'local' && html`<div className="mb-4 p-3 rounded-xl text-xs bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:border-amber-500/20">This view can't reach your saved data, so changes here won't be kept. Open the page on claude.ai while signed in.</div>`}
+      ${store.readOnly && html`<div className="mb-4 p-3 rounded-xl text-xs bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-200">You're viewing Soulvee OS read-only.</div>`}
+      ${view}
+    </main>
+    ${dealEdit && html`<${DealModal} deal=${dealEdit} offers=${store.data.offers} onClose=${() => setDealEdit(null)} onSave=${saveDeal} />`}
+    ${invEdit && html`<${InvoiceModal} invoice=${invEdit.inv} deal=${invEdit.deal} store=${store} toast=${toast} onClose=${() => setInvEdit(null)} />`}
+    ${toastMsg && html`<div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] max-w-[92vw] px-4 py-3 rounded-xl text-sm font-medium text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 shadow-2xl">${toastMsg}</div>`}
+  </div>`;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+})();
+</script>
+</body>
+</html>

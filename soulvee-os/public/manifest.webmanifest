@@ -1,0 +1,10 @@
+{
+  "name": "Soulvee OS",
+  "short_name": "Soulvee OS",
+  "description": "Command centre for DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emporium and EFR.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0715",
+  "theme_color": "#0b0715",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
