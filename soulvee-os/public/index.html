@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/vendor/app.css">
@@ -31,9 +31,17 @@ try { var t = localStorage.getItem('cu-theme'); if (t === 'light') document.docu
 <div id="root"></div>
 <script src="/os-runtime.js"></script>
 <script>
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+</script>
+<script>
 (function () {
 const { useState, useEffect, useMemo, useRef } = React;
 const html = htm.bind(React.createElement);
+// Store errors are already shown as a toast; don't report them again as unhandled.
+window.addEventListener('unhandledrejection', e => { if (e.reason && e.reason.__toasted) e.preventDefault(); });
+const sure = what => confirm(`Delete ${what}? This can't be undone.`);
+const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+const aiOffText = () => (window.SoulveeOS && window.SoulveeOS.aiOffReason && window.SoulveeOS.aiOffReason()) || 'AI is off.';
 
 /* ---------------- constants ---------------- */
 const BRANDS = [
@@ -91,8 +99,14 @@ const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(3
 const localDate = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return localDate(d); };
 const num = v => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; };
-const ngn = n => '₦' + Math.round(n || 0).toLocaleString('en-NG');
-const ngnShort = n => { const a = Math.abs(n || 0); if (a >= 1e9) return '₦' + (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B'; if (a >= 1e6) return '₦' + (n / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M'; if (a >= 1e3) return '₦' + Math.round(n / 1e3) + 'K'; return ngn(n); };
+const ngn = n => { const v = Math.round(num(n)); return (v < 0 ? '−' : '') + '₦' + Math.abs(v).toLocaleString('en-NG'); };
+const ngnShort = n => {
+  const v = num(n); const a = Math.abs(v); const sign = Math.round(v) < 0 ? '−' : '';
+  if (a >= 999995000) return sign + '₦' + (a / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (a >= 999500) return sign + '₦' + (a / 1e6).toFixed(2).replace(/\.?0+$/, '') + 'M';
+  if (a >= 1e3) return sign + '₦' + Math.round(a / 1e3) + 'K';
+  return ngn(v);
+};
 const fmtDate = iso => { if (!iso) return '—'; const d = new Date(String(iso).length <= 10 ? iso + 'T12:00:00' : iso); return isNaN(d) ? String(iso) : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
 const fmtDateTime = iso => { if (!iso) return '—'; const d = new Date(iso); if (isNaN(d)) return String(iso); return String(iso).length <= 10 ? fmtDate(iso) : d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
 const year = new Date().getFullYear();
@@ -105,7 +119,8 @@ const inPeriod = (d, p) => !!d && d >= PERIODS[p].from && d <= PERIODS[p].to;
 
 function invTotals(inv, settings) {
   const sub = (inv.items || []).reduce((a, it) => a + num(it.amount), 0);
-  const vat = inv.vat ? sub * (num(settings.vatRate) || 7.5) / 100 : 0;
+  const rate = settings.vatRate === '' || settings.vatRate == null ? 7.5 : num(settings.vatRate);
+  const vat = inv.vat ? sub * rate / 100 : 0;
   const wht = sub * num(inv.wht) / 100;
   return { sub, vat, total: sub + vat, wht, net: sub + vat - wht };
 }
@@ -181,6 +196,8 @@ function useStore(toast) {
     return s;
   });
   const dbRef = useRef(null);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   useEffect(() => {
     let alive = true; const unsubs = [];
@@ -211,6 +228,7 @@ function useStore(toast) {
     if (e && e.code === 'invalid_argument') { setReadOnly(true); toast('You can view this unit but not change it.'); }
     else if (e && e.code === 'quota_exceeded') toast('Storage is full — delete old records to add more.');
     else toast('Could not save: ' + ((e && e.message) || 'try again'));
+    if (e && typeof e === 'object') e.__toasted = true;
     throw e;
   };
   const add = async (c, obj) => {
@@ -229,11 +247,12 @@ function useStore(toast) {
     else setData(p => ({ ...p, [c]: p[c].filter(x => x.id !== id) }));
   };
   const saveSettings = async s => {
+    settingsRef.current = s;
     setSettings(s);
     try { localStorage.setItem('cu-theme', s.theme); } catch (e) {}
     if (dbRef.current) { try { const { theme, ...rest } = s; await dbRef.current.doc('settings/main').set(rest); } catch (e) { fail(e); } }
   };
-  return { mode, stale, readOnly, data, settings, setSettings, add, update, remove, saveSettings };
+  return { mode, stale, readOnly, data, settings, setSettings, latestSettings: () => settingsRef.current, add, update, remove, saveSettings };
 }
 
 /* ---------------- UI atoms ---------------- */
@@ -259,7 +278,9 @@ function Field({ label, hint, children, className = '' }) {
 function Input(p) { return html`<input ...${p} className=${inputCls + ' ' + (p.className || '')} />`; }
 function Area(p) { return html`<textarea ...${p} className=${inputCls + ' ' + (p.className || '')} />`; }
 function Select({ value, onChange, options, className = '' }) {
-  return html`<select value=${value} onChange=${e => onChange(e.target.value)} className=${inputCls + ' ' + className}>${options.map(o => typeof o === 'string' ? html`<option key=${o} value=${o}>${o}</option>` : html`<option key=${o.v} value=${o.v}>${o.l}</option>`)}</select>`;
+  const opts = options.map(o => typeof o === 'string' ? { v: o, l: o } : o);
+  if (options.every(o => typeof o === 'string') && value != null && value !== '' && !opts.some(o => o.v === value)) opts.push({ v: value, l: String(value) });
+  return html`<select value=${value == null ? '' : value} onChange=${e => onChange(e.target.value)} className=${inputCls + ' ' + className}>${opts.map(o => html`<option key=${o.v} value=${o.v}>${o.l}</option>`)}</select>`;
 }
 const brandOptions = BRANDS.map(b => ({ v: b.id, l: b.name }));
 function BrandChip({ id }) {
@@ -278,8 +299,19 @@ function Pill({ tone = 'slate', children }) {
   return html`<span className=${'text-[11px] font-semibold px-2 py-0.5 rounded-full capitalize ' + t}>${children}</span>`;
 }
 function Modal({ title, onClose, children, footer, wide }) {
-  return html`<div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm" onClick=${onClose}>
-    <div className=${'w-full ' + (wide ? 'sm:max-w-2xl' : 'sm:max-w-lg') + ' max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white dark:bg-[#150d26] border border-slate-200 dark:border-white/10 p-5'} onClick=${e => e.stopPropagation()}>
+  const downOnBackdrop = useRef(false);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') closeRef.current(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, []);
+  // Rendered into <body> so parent spacing (space-y-*) can't offset the overlay and leave the header clickable.
+  return ReactDOM.createPortal(html`<div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm" role="dialog" aria-modal="true" onMouseDown=${e => { downOnBackdrop.current = e.target === e.currentTarget; }} onClick=${e => { if (downOnBackdrop.current && e.target === e.currentTarget) onClose(); downOnBackdrop.current = false; }}>
+    <div className=${'w-full ' + (wide ? 'sm:max-w-2xl' : 'sm:max-w-lg') + ' max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-2xl bg-white dark:bg-[#150d26] border border-slate-200 dark:border-white/10 p-5'}>
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-base">${title}</h3>
         <button onClick=${onClose} className="w-8 h-8 rounded-full bg-slate-100 dark:bg-white/10 text-sm" aria-label="Close">✕</button>
@@ -287,7 +319,7 @@ function Modal({ title, onClose, children, footer, wide }) {
       ${children}
       ${footer && html`<div className="mt-5 flex flex-wrap gap-2 justify-end">${footer}</div>`}
     </div>
-  </div>`;
+  </div>`, document.body);
 }
 function Empty({ title, children }) {
   return html`<div className="text-center py-8 px-4"><p className="font-medium text-sm">${title}</p>${children && html`<div className=${'text-xs mt-1 ' + muted}>${children}</div>`}</div>`;
@@ -314,7 +346,7 @@ function Chips({ value, onChange, options }) {
 }
 
 /* ---------------- Command ---------------- */
-function CommandView({ store, go, openDeal, openInvoice }) {
+function CommandView({ store, caps, go, openDeal, openInvoice }) {
   const { data, settings } = store;
   const [period, setPeriod] = useState('h2');
   const s = useMemo(() => computeSnapshot(data, settings, period), [data, settings, period]);
@@ -366,7 +398,7 @@ function CommandView({ store, go, openDeal, openInvoice }) {
       <${Btn} onClick=${() => openDeal(null)}>+ Deal</${Btn}>
       <${Btn} kind="ghost" onClick=${() => openInvoice(null)}>+ Invoice</${Btn}>
       <${Btn} kind="ghost" onClick=${() => go('skills')}>Convert a skill</${Btn}>
-      <${Btn} kind="ghost" onClick=${() => go('workspace')}>Gmail lead radar</${Btn}>
+      ${caps.mcp === null ? html`<${Btn} kind="ghost" onClick=${() => go('money')}>Log money</${Btn}>` : html`<${Btn} kind="ghost" onClick=${() => go('workspace')}>Gmail lead radar</${Btn}>`}
     </div>
   </div>`;
 }
@@ -452,7 +484,7 @@ Return ONLY a JSON object, no prose:
     <${Card} className="glow">
       <p className="font-semibold text-sm mb-1">✦ Skill converter</p>
       <p className=${'text-xs mb-3 ' + muted}>Describe a skill — the AI packages it in the right brand voice with three NGN tiers. Prices it suggests are flagged until you confirm them.</p>
-      ${caps.sample === null ? html`<p className="text-sm text-amber-600 dark:text-amber-400">AI is off. Add ANTHROPIC_API_KEY on the Soulvee OS server to use the converter — you can still add offers by hand.</p>` : html`
+      ${caps.sample === null ? html`<p className="text-sm text-amber-600 dark:text-amber-400">${aiOffText()} You can still add offers by hand.</p>` : html`
       <div className="grid sm:grid-cols-3 gap-3">
         <${Field} label="Brand"><${Select} value=${conv.brand} onChange=${v => setConv({ ...conv, brand: v })} options=${brandOptions} /><//>
         <${Field} label="Skill" className="sm:col-span-2"><${Input} value=${conv.skill} onChange=${e => setConv({ ...conv, skill: e.target.value })} placeholder="e.g. I build MCP servers that connect a business's tools to Claude" /><//>
@@ -487,7 +519,7 @@ Return ONLY a JSON object, no prose:
             <${Btn} small onClick=${() => startDeal(o)}>Start deal</${Btn}>
             <${Btn} small kind="ghost" onClick=${() => setEditing(o)}>Edit</${Btn}>
             <select className=${inputCls + ' !w-auto !py-1.5 text-xs'} value=${o.status} onChange=${e => update('offers', o.id, { status: e.target.value })}>${OFFER_STATUS.map(st => html`<option key=${st} value=${st}>${st}</option>`)}</select>
-            <${Btn} small kind="danger" onClick=${() => remove('offers', o.id)}>Delete</${Btn}>
+            <${Btn} small kind="danger" onClick=${() => sure(`the offer "${o.name}"`) && remove('offers', o.id)}>Delete</${Btn}>
           </div>
         <//>`;
       })}</div>`}
@@ -501,14 +533,17 @@ function DealModal({ deal, offers, onClose, onSave }) {
   const [f, setF] = useState(() => ({ client: '', email: '', brand: 'smc', offerId: '', value: '', stage: 'lead', prob: '', source: 'Direct', nextStep: '', nextDue: '', notes: '', ...(deal || {}) }));
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const brandOffers = offers.filter(o => o.brand === f.brand);
+  const setBrand = v => setF(p => ({ ...p, brand: v, offerId: v === p.brand ? p.offerId : '' }));
+  // A win chance still on the old stage's default follows the new stage; a custom one is kept.
+  const setStage = v => setF(p => ({ ...p, stage: v, prob: p.prob === '' || p.prob == null || num(p.prob) === stageOf(p.stage).p ? '' : p.prob }));
   return html`<${Modal} title=${deal && deal.id ? 'Edit deal' : 'New deal'} onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} disabled=${!String(f.client).trim()} onClick=${() => onSave({ ...f, client: String(f.client).trim(), value: num(f.value), prob: f.prob === '' ? stageOf(f.stage).p : num(f.prob) })}>Save deal</${Btn}>`}>
     <div className="grid grid-cols-2 gap-3">
       <${Field} label="Client" className="col-span-2"><${Input} value=${f.client} onChange=${e => set('client', e.target.value)} placeholder="Business or person" /><//>
-      <${Field} label="Client email" className="col-span-2" hint="Needed for Gmail follow-ups and calendar invites"><${Input} type="email" value=${f.email} onChange=${e => set('email', e.target.value)} /><//>
-      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${v => set('brand', v)} options=${brandOptions} /><//>
+      <${Field} label="Client email" className="col-span-2" hint="Used for follow-up emails and calendar invites"><${Input} type="email" value=${f.email} onChange=${e => set('email', e.target.value)} /><//>
+      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${setBrand} options=${brandOptions} /><//>
       <${Field} label="Offer"><${Select} value=${f.offerId} onChange=${v => { const o = offers.find(x => x.id === v); set('offerId', v); if (o && !num(f.value)) { const t = (o.tiers || []).find(t => num(t.price) > 0); if (t) set('value', t.price); } }} options=${[{ v: '', l: '— none —' }, ...brandOffers.map(o => ({ v: o.id, l: o.name }))]} /><//>
       <${Field} label="Value (₦)"><${Input} inputMode="numeric" value=${f.value} onChange=${e => set('value', e.target.value)} /><//>
-      <${Field} label="Stage"><${Select} value=${f.stage} onChange=${v => set('stage', v)} options=${STAGES.map(s => ({ v: s.id, l: s.name }))} /><//>
+      <${Field} label="Stage"><${Select} value=${f.stage} onChange=${setStage} options=${STAGES.map(s => ({ v: s.id, l: s.name }))} /><//>
       <${Field} label="Win chance %"><${Input} inputMode="numeric" value=${f.prob} placeholder=${String(stageOf(f.stage).p)} onChange=${e => set('prob', e.target.value)} /><//>
       <${Field} label="Source"><${Select} value=${f.source} onChange=${v => set('source', v)} options=${SOURCES} /><//>
       <${Field} label="Next step" className="col-span-2"><${Input} value=${f.nextStep} onChange=${e => set('nextStep', e.target.value)} placeholder="e.g. Send Option 2 proposal" /><//>
@@ -542,9 +577,11 @@ Plain text only, no markdown, no subject line. Sign off as "Soulvee" with "Soulv
     if (res.ok) { toast('Draft saved in Gmail — review and send it there'); onDone(res.payload && res.payload.viewUrl); }
     else toast(res.error);
   };
-  return html`<${Modal} title="Follow-up email" onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${write} disabled=${!caps.sample || !!busy}>${busy === 'write' ? 'Writing…' : body ? 'Rewrite with AI' : 'Write with AI'}</${Btn}><${Btn} onClick=${save} disabled=${!caps.mcp || !body.trim() || !!busy}>${busy === 'save' ? 'Saving…' : 'Save as Gmail draft'}</${Btn}>`}>
+  const ready = !!body.trim();
+  const mailto = 'mailto:' + String(deal.email || '').replace(/[^A-Za-z0-9@._+-]/g, '') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+  const copy = async () => { try { await navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`); toast('Copied'); } catch (e) { toast('Copy blocked — select the text and copy it manually'); } };
+  return html`<${Modal} title="Follow-up email" onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${write} disabled=${!caps.sample || !!busy}>${busy === 'write' ? 'Writing…' : body ? 'Rewrite with AI' : 'Write with AI'}</${Btn}>${caps.mcp ? html`<${Btn} onClick=${save} disabled=${!ready || !!busy}>${busy === 'save' ? 'Saving…' : 'Save as Gmail draft'}</${Btn}>` : html`<${Btn} kind="ghost" onClick=${copy} disabled=${!ready}>Copy</${Btn}><a href=${ready ? mailto : undefined} aria-disabled=${!ready} className=${'px-4 py-2 text-sm rounded-xl font-medium bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:opacity-90 shadow-sm' + (ready ? '' : ' opacity-40 pointer-events-none')}>Open in email app</a>`}`}>
     ${!deal.email && html`<p className="text-xs text-amber-600 dark:text-amber-400 mb-3">No client email on this deal — the draft will have no recipient. Add one via Edit.</p>`}
-    ${!caps.mcp && html`<p className="text-xs text-amber-600 dark:text-amber-400 mb-3">Gmail drafts need the claude.ai version of this page — copy the email instead.</p>`}
     <div className="space-y-3">
       <${Field} label="To"><${Input} value=${deal.email || ''} disabled /><//>
       <${Field} label="Subject"><${Input} value=${subject} onChange=${e => setSubject(e.target.value)} /><//>
@@ -570,8 +607,33 @@ function CalendarModal({ prefill, caps, toast, onClose }) {
     setBusy(false);
     if (res.ok) { toast('Event added to Google Calendar'); onClose(); } else toast(res.error);
   };
-  return html`<${Modal} title="Book on Google Calendar" onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${create} disabled=${!caps.mcp || busy || !f.summary.trim()}>${busy ? 'Booking…' : 'Create event'}</${Btn}>`}>
-    ${!caps.mcp && html`<p className="text-xs text-amber-600 dark:text-amber-400 mb-3">Calendar booking needs the claude.ai version of this page.</p>`}
+  const startAt = new Date(`${f.date}T${f.time}:00`);
+  const ok = !!f.summary.trim() && !isNaN(startAt.getTime());
+  const endAt = new Date(startAt.getTime() + (num(f.mins) || 30) * 60000);
+  const stamp = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const gcalUrl = () => {
+    const q = new URLSearchParams({ action: 'TEMPLATE', text: f.summary.trim(), dates: stamp(startAt) + '/' + stamp(endAt) });
+    if (f.location) q.set('location', f.location);
+    if (f.email) q.set('add', f.email);
+    return 'https://calendar.google.com/calendar/render?' + q.toString();
+  };
+  const downloadIcs = () => {
+    const esc = v => String(v).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+    const fold = line => line.length <= 74 ? line : line.match(/.{1,73}/g).join('\r\n ');
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Soulvee OS//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+      `UID:${uid()}@soulvee-os`, `DTSTAMP:${stamp(new Date())}`, `DTSTART:${stamp(startAt)}`, `DTEND:${stamp(endAt)}`, `SUMMARY:${esc(f.summary.trim())}`];
+    if (f.location) lines.push(`LOCATION:${esc(f.location)}`);
+    if (f.email) lines.push(`ATTENDEE;RSVP=TRUE:mailto:${f.email}`);
+    lines.push('END:VEVENT', 'END:VCALENDAR');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.map(fold).join('\r\n') + '\r\n'], { type: 'text/calendar' }));
+    a.download = (f.summary.replace(/[^\w\- ]+/g, '').trim() || 'event') + '.ics';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('Calendar file downloaded — open it to add the event'); onClose();
+  };
+  return html`<${Modal} title=${caps.mcp ? 'Book on Google Calendar' : 'Book a call'} onClose=${onClose} footer=${caps.mcp ? html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${create} disabled=${busy || !ok}>${busy ? 'Booking…' : 'Create event'}</${Btn}>` : html`<${Btn} kind="ghost" onClick=${downloadIcs} disabled=${!ok}>Download .ics</${Btn}><a href=${ok ? gcalUrl() : undefined} target="_blank" rel="noopener" aria-disabled=${!ok} onClick=${() => { if (ok) setTimeout(onClose, 0); }} className=${'px-4 py-2 text-sm rounded-xl font-medium bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:opacity-90 shadow-sm' + (ok ? '' : ' opacity-40 pointer-events-none')}>Open in Google Calendar</a>`}>
+    ${!caps.mcp && html`<p className=${'text-xs mb-3 ' + muted}>Opens Google Calendar with the details filled in, or download a calendar file for any calendar app.</p>`}
     <div className="grid grid-cols-2 gap-3">
       <${Field} label="Title" className="col-span-2"><${Input} value=${f.summary} onChange=${e => set('summary', e.target.value)} /><//>
       <${Field} label="Date"><${Input} type="date" value=${f.date} onChange=${e => set('date', e.target.value)} /><//>
@@ -579,7 +641,7 @@ function CalendarModal({ prefill, caps, toast, onClose }) {
       <${Field} label="Length (mins)"><${Input} inputMode="numeric" value=${f.mins} onChange=${e => set('mins', e.target.value)} /><//>
       <${Field} label="Invite (email)"><${Input} type="email" value=${f.email} onChange=${e => set('email', e.target.value)} /><//>
       <${Field} label="Location" className="col-span-2"><${Input} value=${f.location} onChange=${e => set('location', e.target.value)} placeholder="Optional" /><//>
-      <label className="col-span-2 flex items-center gap-2 text-sm"><input type="checkbox" checked=${f.meet} onChange=${e => set('meet', e.target.checked)} /> Add a Google Meet link</label>
+      ${caps.mcp && html`<label className="col-span-2 flex items-center gap-2 text-sm"><input type="checkbox" checked=${f.meet} onChange=${e => set('meet', e.target.checked)} /> Add a Google Meet link</label>`}
     </div>
   <//>`;
 }
@@ -614,7 +676,7 @@ function PipelineView({ store, caps, toast, openDeal, openInvoice }) {
         <${Btn} small kind="ghost" onClick=${() => setCal({ summary: `${brandOf(d.brand).short} × ${d.client}`, email: d.email })}>📅 Book</${Btn}>
         <${Btn} small kind="ghost" onClick=${() => openDeal(d)}>Edit</${Btn}>
         ${!['won', 'lost'].includes(d.stage) && html`<${Btn} small kind="danger" onClick=${() => update('deals', d.id, { stage: 'lost', prob: 0 })}>Lost</${Btn}>`}
-        ${d.stage === 'lost' && html`<${Btn} small kind="danger" onClick=${() => remove('deals', d.id)}>Delete</${Btn}>`}
+        ${d.stage === 'lost' && html`<${Btn} small kind="danger" onClick=${() => sure(`the deal with ${d.client}`) && remove('deals', d.id)}>Delete</${Btn}>`}
       </div>
     <//>`)}</div>`}
     ${follow && html`<${FollowUpModal} deal=${follow} offers=${data.offers} caps=${caps} toast=${toast} onClose=${() => setFollow(null)} onDone=${() => setFollow(null)} />`}
@@ -626,10 +688,11 @@ function PipelineView({ store, caps, toast, openDeal, openInvoice }) {
 function InvoiceModal({ invoice, deal, store, onClose, toast }) {
   const { data, settings, add, update, saveSettings } = store;
   const offer = deal && data.offers.find(o => o.id === deal.offerId);
-  const [f, setF] = useState(() => invoice && invoice.id ? { ...invoice, items: invoice.items.map(i => ({ ...i })) } : {
+  const whtStart = ['0', '5', '10'].includes(String(num(settings.whtDefault))) ? String(num(settings.whtDefault)) : '0';
+  const [f, setF] = useState(() => invoice && invoice.id ? { ...invoice, items: (invoice.items && invoice.items.length ? invoice.items : [{ desc: '', amount: '' }]).map(i => ({ ...i })) } : {
     client: deal ? deal.client : '', clientEmail: deal ? (deal.email || '') : '', brand: deal ? deal.brand : 'smc',
     items: [{ desc: deal ? (offer ? offer.name : 'Services') : '', amount: deal ? String(deal.value || '') : '' }],
-    vat: true, wht: '0', issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft',
+    vat: true, wht: whtStart, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft',
     offerId: deal ? (deal.offerId || '') : '', dealId: deal ? deal.id : '',
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -681,15 +744,23 @@ function invoiceText(inv, settings) {
     ...(inv.items || []).map(i => `• ${i.desc} — ${ngn(i.amount)}`), '',
     `Subtotal: ${ngn(t.sub)}`, `VAT (${inv.vat ? settings.vatRate : 0}%): ${ngn(t.vat)}`, `TOTAL: ${ngn(t.total)}`,
     ...(t.wht > 0 ? [`WHT (${inv.wht}%) deducted by client: ${ngn(t.wht)} — please send the credit note`, `Amount payable: ${ngn(t.net)}`] : []), '',
-    `Payment: ${c.payment}`, inv.notes ? `Notes: ${inv.notes}` : '', 'Thank you for your business.',
-  ].filter(x => x !== null).join('\n');
+    `Payment: ${c.payment}`, ...(inv.notes ? [`Notes: ${inv.notes}`] : []), 'Thank you for your business.',
+  ].join('\n');
 }
 
 function PaidModal({ inv, store, toast, onClose }) {
   const { settings, add, update } = store;
   const t = invTotals(inv, settings);
-  const [f, setF] = useState({ date: localDate(), method: settings.company.payment || 'Moniepoint', currency: 'NGN', amount: String(Math.round(t.net)), fx: '' });
+  const payText = String(settings.company.payment || '').toLowerCase();
+  const [f, setF] = useState({ date: localDate(), method: METHODS.find(m => payText.includes(m.toLowerCase())) || 'Moniepoint', currency: 'NGN', amount: String(Math.round(t.net)), fx: '' });
+  const [touched, setTouched] = useState(false);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  // Until the amount is edited by hand, keep it equal to the invoice total in the chosen currency.
+  const setCurrency = v => setF(p => {
+    if (touched) return { ...p, currency: v };
+    const r = v === 'NGN' ? 1 : num(settings.fx[v]);
+    return { ...p, currency: v, fx: '', amount: r ? String(Math.round(t.net / r * 100) / 100) : '' };
+  });
   const rate = f.currency === 'NGN' ? 1 : (num(f.fx) || num(settings.fx[f.currency]));
   const ngnVal = num(f.amount) * rate;
   const save = async () => {
@@ -701,8 +772,8 @@ function PaidModal({ inv, store, toast, onClose }) {
     <div className="grid grid-cols-2 gap-3">
       <${Field} label="Date received"><${Input} type="date" value=${f.date} onChange=${e => set('date', e.target.value)} /><//>
       <${Field} label="Method"><${Select} value=${f.method} onChange=${v => set('method', v)} options=${METHODS} /><//>
-      <${Field} label="Currency received"><${Select} value=${f.currency} onChange=${v => set('currency', v)} options=${CURRENCIES} /><//>
-      <${Field} label="Amount received"><${Input} inputMode="decimal" value=${f.amount} onChange=${e => set('amount', e.target.value)} /><//>
+      <${Field} label="Currency received"><${Select} value=${f.currency} onChange=${setCurrency} options=${CURRENCIES} /><//>
+      <${Field} label="Amount received"><${Input} inputMode="decimal" value=${f.amount} onChange=${e => { setTouched(true); set('amount', e.target.value); }} /><//>
       ${f.currency !== 'NGN' && html`<${Field} label=${`Rate used (₦ per 1 ${f.currency})`} className="col-span-2" hint="Enter the rate you actually got — this is what converts it into NGN revenue."><${Input} inputMode="decimal" value=${f.fx || (num(settings.fx[f.currency]) || '')} onChange=${e => set('fx', e.target.value)} /><//>`}
     </div>
     <p className="mt-4 text-sm">Logs <span className="font-bold">${ngn(ngnVal)}</span> to ${brandOf(inv.brand).short} revenue.${t.wht > 0 ? ` Remember to collect the ${ngn(t.wht)} WHT credit note.` : ''}</p>
@@ -715,11 +786,11 @@ function LedgerModal({ store, toast, onClose }) {
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const rate = f.currency === 'NGN' ? 1 : (num(f.fx) || num(settings.fx[f.currency]));
   const ngnVal = num(f.amount) * rate;
-  const save = async () => { await add('ledger', { ...f, amount: num(f.amount), fx: rate, ngn: ngnVal }); toast('Entry logged'); onClose(); };
+  const save = async () => { await add('ledger', { ...f, offerId: f.type === 'income' ? f.offerId : '', amount: num(f.amount), fx: rate, ngn: ngnVal }); toast('Entry logged'); onClose(); };
   return html`<${Modal} title="Log money in / out" onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} disabled=${!(ngnVal > 0)} onClick=${save}>Save entry</${Btn}>`}>
     <div className="grid grid-cols-2 gap-3">
       <${Field} label="Type"><${Select} value=${f.type} onChange=${v => set('type', v)} options=${[{ v: 'income', l: 'Money in' }, { v: 'expense', l: 'Money out' }]} /><//>
-      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${v => set('brand', v)} options=${brandOptions} /><//>
+      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${v => setF(p => ({ ...p, brand: v, offerId: v === p.brand ? p.offerId : '' }))} options=${brandOptions} /><//>
       <${Field} label="Amount"><${Input} inputMode="decimal" value=${f.amount} onChange=${e => set('amount', e.target.value)} /><//>
       <${Field} label="Currency"><${Select} value=${f.currency} onChange=${v => set('currency', v)} options=${CURRENCIES} /><//>
       ${f.currency !== 'NGN' && html`<${Field} label=${`Rate (₦ per 1 ${f.currency})`} className="col-span-2"><${Input} inputMode="decimal" value=${f.fx || (num(settings.fx[f.currency]) || '')} onChange=${e => set('fx', e.target.value)} /><//>`}
@@ -750,6 +821,21 @@ function MoneyView({ store, toast, openInvoice }) {
   const allocBase = Math.max(0, s.net - vatCollected);
 
   const copy = async t => { try { await navigator.clipboard.writeText(t); toast('Copied'); } catch (e) { toast('Copy blocked — select the text and copy it manually'); } };
+  // Reverses "Mark paid": removes the payment from the ledger and reopens the invoice.
+  const unpay = async inv => {
+    const entries = data.ledger.filter(l => l.invoiceId === inv.id);
+    if (!confirm(`Undo the payment on ${inv.number}? It goes back to unpaid${entries.length ? ' and the payment is removed from the ledger' : ''}.`)) return;
+    for (const l of entries) await remove('ledger', l.id);
+    await update('invoices', inv.id, { status: 'sent', paidDate: '', paidNgn: 0 });
+    toast(`${inv.number} is unpaid again`);
+  };
+  const delEntry = async l => {
+    const inv = l.invoiceId && data.invoices.find(i => i.id === l.invoiceId);
+    if (inv) return unpay(inv);
+    if (!sure('this entry')) return;
+    await remove('ledger', l.id);
+    toast('Entry deleted');
+  };
 
   return html`<div className="space-y-5">
     <${Section} title="Money" sub="Invoice it, collect it, convert it, allocate it." action=${html`<${Chips} value=${sub} onChange=${setSub} options=${[{ v: 'invoices', l: 'Invoices' }, { v: 'ledger', l: 'Ledger' }, { v: 'alloc', l: 'Allocate & tax' }]} />`} />
@@ -768,7 +854,8 @@ function MoneyView({ store, toast, openInvoice }) {
             ${st !== 'paid' && html`<${Btn} small kind="good" onClick=${() => setPaying(inv)}>Mark paid</${Btn}>`}
             <${Btn} small kind="ghost" onClick=${() => setText(invoiceText(inv, settings))}>Invoice text</${Btn}>
             <${Btn} small kind="ghost" onClick=${() => openInvoice(inv)}>Edit</${Btn}>
-            ${st !== 'paid' && html`<${Btn} small kind="danger" onClick=${() => remove('invoices', inv.id)}>Delete</${Btn}>`}
+            ${st === 'paid' && html`<${Btn} small kind="ghost" onClick=${() => unpay(inv)}>Undo paid</${Btn}>`}
+            ${st !== 'paid' && html`<${Btn} small kind="danger" onClick=${() => sure(inv.number) && remove('invoices', inv.id)}>Delete</${Btn}>`}
           </div>
         <//>`;
       })}
@@ -779,7 +866,7 @@ function MoneyView({ store, toast, openInvoice }) {
       <${Card} className="!p-0 overflow-hidden">
         ${ledger.length === 0 ? html`<${Empty} title="Ledger is empty">Paid invoices land here automatically. Log Selar, Spreadshop or gig cash with + Entry.<//>` : ledger.map(l => html`<div key=${l.id} className="flex items-center justify-between gap-2 px-4 py-3 border-b last:border-0 border-slate-100 dark:border-white/5">
           <div className="min-w-0"><p className="text-sm font-medium truncate">${l.note || l.method}</p><p className=${'text-[11px] ' + muted}>${fmtDate(l.date)} · ${brandOf(l.brand).short} · ${l.method}${l.currency !== 'NGN' ? ` · ${l.currency} ${num(l.amount).toLocaleString()} @ ₦${num(l.fx).toLocaleString()}` : ''}</p></div>
-          <div className="flex items-center gap-2 shrink-0"><span className=${'font-semibold text-sm ' + (l.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>${l.type === 'income' ? '+' : '−'}${ngn(l.ngn)}</span>${!l.invoiceId && html`<button className="text-xs text-rose-500" onClick=${() => remove('ledger', l.id)}>✕</button>`}</div>
+          <div className="flex items-center gap-2 shrink-0"><span className=${'font-semibold text-sm ' + (l.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>${l.type === 'income' ? '+' : '−'}${ngn(l.ngn)}</span><button className="text-xs text-rose-500 px-1" aria-label="Delete entry" title=${l.invoiceId ? 'Undo this payment' : 'Delete entry'} onClick=${() => delEntry(l)}>✕</button></div>
         </div>`)}
       <//>
     </div>`}
@@ -799,6 +886,7 @@ function MoneyView({ store, toast, openInvoice }) {
       <//>
       <${Card} className="!p-0 overflow-hidden">
         <div className="px-4 py-3 font-semibold text-sm border-b border-slate-100 dark:border-white/5">Brand P&L · ${s.period}</div>
+        <div className=${'grid grid-cols-4 gap-2 px-4 py-2 text-[11px] uppercase tracking-wide border-b border-slate-100 dark:border-white/5 ' + muted}><span>Brand</span><span className="text-right">In</span><span className="text-right">Out</span><span className="text-right">Net</span></div>
         ${s.byBrand.map(b => html`<div key=${b.id} className="grid grid-cols-4 gap-2 px-4 py-2.5 text-sm border-b last:border-0 border-slate-100 dark:border-white/5"><span className="truncate">${b.name}</span><span className="text-right text-emerald-600 dark:text-emerald-400">${ngnShort(b.income)}</span><span className="text-right text-rose-600 dark:text-rose-400">${ngnShort(b.expenses)}</span><span className="text-right font-semibold">${ngnShort(b.income - b.expenses)}</span></div>`)}
       <//>
       <p className=${'text-[11px] ' + muted}>Tax figures are working estimates from your own records, not filing advice — confirm with your accountant before remitting.</p>
@@ -923,7 +1011,7 @@ function AssistantView({ store, caps, toast }) {
     { name: 'create_offer', description: 'Save a new offer to the catalogue as status "packaging". Use only when Soulvee asks to save or create an offer.', inputSchema: { type: 'object', required: ['name', 'brand'], properties: { name: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, pitch: { type: 'string' }, model: { type: 'string', enum: MODELS }, tiers: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, price: { type: 'number' }, deliverables: { type: 'array', items: { type: 'string' } } } } } } },
       execute: async a => { await ref.current.add('offers', { name: a.name, brand: a.brand, pitch: a.pitch || '', model: a.model || 'project', status: 'packaging', channels: [], firstMove: '', tiers: (a.tiers || []).map(t => ({ name: t.name || '', price: num(t.price), deliverables: t.deliverables || [], suggested: true })) }); setActs(x => [...x, `Saved offer: ${a.name}`]); return { ok: true }; } },
     { name: 'create_draft_invoice', description: 'Create a DRAFT invoice (never sent or marked paid). Use only when Soulvee asks for an invoice.', inputSchema: { type: 'object', required: ['client', 'brand', 'items'], properties: { client: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, vat: { type: 'boolean' }, items: { type: 'array', items: { type: 'object', properties: { desc: { type: 'string' }, amount: { type: 'number' } } } } } },
-      execute: async a => { const st = ref.current.settings; const number = invNumber(a.client, st.invoiceSeq); await ref.current.add('invoices', { number, client: a.client, clientEmail: '', brand: a.brand, items: (a.items || []).map(i => ({ desc: i.desc || '', amount: num(i.amount) })), vat: a.vat !== false, wht: 0, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft', offerId: '', dealId: '' }); await ref.current.saveSettings({ ...st, invoiceSeq: num(st.invoiceSeq) + 1 }); setActs(x => [...x, `Drafted invoice ${number}`]); return { ok: true, number }; } },
+      execute: async a => { const st = ref.current.latestSettings(); const number = invNumber(a.client, st.invoiceSeq); await ref.current.add('invoices', { number, client: a.client, clientEmail: '', brand: a.brand, items: (a.items || []).map(i => ({ desc: i.desc || '', amount: num(i.amount) })), vat: a.vat !== false, wht: 0, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft', offerId: '', dealId: '' }); await ref.current.saveSettings({ ...st, invoiceSeq: num(st.invoiceSeq) + 1 }); setActs(x => [...x, `Drafted invoice ${number}`]); return { ok: true, number }; } },
   ];
 
   const preamble = () => `${voiceFor(voice)}
@@ -950,7 +1038,7 @@ Plain text with short lines; simple dashes for lists; no markdown headers or tab
   };
   const copy = async t => { try { await navigator.clipboard.writeText(t); toast('Copied'); } catch (e) { toast('Copy blocked — long-press to copy'); } };
 
-  if (caps.sample === null) return html`<${Section} title="AI sub-agent"><${Card}><${Empty} title="AI is off">Set ANTHROPIC_API_KEY on the Soulvee OS server (see README), then reload.<//><//><//>`;
+  if (caps.sample === null) return html`<${Section} title="AI sub-agent"><${Card}><${Empty} title="AI isn't available">${aiOffText()}<//><//><//>`;
 
   const prompts = ['Where is my revenue this H2 — what should I chase first?', 'Which deals need a follow-up this week?', 'Draft a reply to a fan asking how to book DJ Soulvee for a December wedding', 'Turn my Google Workspace automation skill into an offer and save it'];
   return html`<div className="space-y-4">
@@ -967,8 +1055,8 @@ Plain text with short lines; simple dashes for lists; no markdown headers or tab
         ${acts.length > 0 && html`<div className="text-[11px] text-emerald-600 dark:text-emerald-400">${acts.map((a, i) => html`<p key=${i}>✓ ${a}</p>`)}</div>`}
         <div ref=${endRef}></div>
       </div>
-      <form className="flex gap-2 p-3 border-t border-slate-100 dark:border-white/10" onSubmit=${e => { e.preventDefault(); send(); }}>
-        <input className=${inputCls} value=${input} onChange=${e => setInput(e.target.value)} placeholder="Ask about money, deals, or paste a message to reply to…" />
+      <form className="flex items-end gap-2 p-3 border-t border-slate-100 dark:border-white/10" onSubmit=${e => { e.preventDefault(); send(); }}>
+        <textarea rows=${Math.min(6, input.split('\n').length)} className=${inputCls + ' resize-none'} value=${input} onChange=${e => setInput(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey && !touch && !(e.nativeEvent && e.nativeEvent.isComposing)) { e.preventDefault(); send(); } }} placeholder=${touch ? 'Ask about money, deals, or paste a message to reply to…' : 'Ask about money, deals, or paste a message to reply to… (Shift+Enter for a new line)'}></textarea>
         ${busy ? html`<${Btn} type="button" kind="ghost" onClick=${() => abortRef.current && abortRef.current.abort()}>Stop</${Btn}>` : html`<${Btn} type="submit" disabled=${!input.trim()}>Send</${Btn}>`}
       </form>
     <//>
@@ -1026,7 +1114,7 @@ Format as plain text with these labels on their own lines: GOAL, KEY IDEAS (3-5 
           ${lvl < 5 && caps.sample && html`<${Btn} small onClick=${() => teach(t)}>Level ${lvl + 1} lesson</${Btn}>`}
           ${lvl < 5 && html`<${Btn} small kind="good" onClick=${() => { update('learning', t.id, { level: lvl + 1 }); toast(`${t.title}: Level ${lvl + 1} done`); }}>Mark level done</${Btn}>`}
           <${Btn} small kind="ghost" onClick=${() => setEditing(t)}>Edit</${Btn}>
-          <${Btn} small kind="danger" onClick=${() => remove('learning', t.id)}>Delete</${Btn}>
+          <${Btn} small kind="danger" onClick=${() => sure(`the "${t.title}" track`) && remove('learning', t.id)}>Delete</${Btn}>
         </div>
       <//>`;
     })}</div>`}
@@ -1041,10 +1129,11 @@ Format as plain text with these labels on their own lines: GOAL, KEY IDEAS (3-5 
 function SetupView({ store, caps, toast }) {
   const { settings, saveSettings, mode, readOnly } = store;
   const [f, setF] = useState(() => JSON.parse(JSON.stringify(settings)));
-  useEffect(() => { setF(JSON.parse(JSON.stringify(settings))); }, [settings]);
+  const savedKey = JSON.stringify({ ...settings, theme: '' });
+  useEffect(() => { setF(JSON.parse(JSON.stringify(settings))); }, [savedKey]);
   const setC = (k, v) => setF(p => ({ ...p, company: { ...p.company, [k]: v } }));
   const allocTotal = f.alloc.reduce((a, b) => a + num(b.pct), 0);
-  const save = async () => { await saveSettings({ ...f, h2Target: num(f.h2Target), vatRate: num(f.vatRate), whtDefault: num(f.whtDefault), invoiceSeq: Math.max(1, num(f.invoiceSeq)), fx: { USD: num(f.fx.USD), GBP: num(f.fx.GBP), EUR: num(f.fx.EUR) }, alloc: f.alloc.map(a => ({ name: a.name, pct: num(a.pct) })) }); toast('Setup saved'); };
+  const save = async () => { await saveSettings({ ...f, theme: settings.theme, h2Target: num(f.h2Target), vatRate: num(f.vatRate), whtDefault: num(f.whtDefault), invoiceSeq: Math.max(1, num(f.invoiceSeq)), fx: { USD: num(f.fx.USD), GBP: num(f.fx.GBP), EUR: num(f.fx.EUR) }, alloc: f.alloc.map(a => ({ name: a.name, pct: num(a.pct) })) }); toast('Setup saved'); };
   const setTheme = t => saveSettings({ ...settings, theme: t });
 
   return html`<div className="space-y-5">
@@ -1089,7 +1178,7 @@ function SetupView({ store, caps, toast }) {
       </div>
     <//>
     <div className="flex items-center justify-between gap-3 flex-wrap">
-      <p className=${'text-[11px] ' + muted}>Storage: ${mode === 'db' ? 'saved on this device — export a backup regularly' : 'connecting…'} · AI ${caps.sample ? 'on' : 'off'} · Google ${caps.mcp ? 'ready' : 'off'}</p>
+      <p className=${'text-[11px] ' + muted}>Storage: ${mode === 'db' ? 'saved on this device — export a backup regularly' : 'connecting…'} · AI ${caps.sample ? 'on' : 'off'}${caps.mcp ? ' · Google ready' : ''}</p>
       <${Btn} onClick=${save} disabled=${readOnly}>Save setup</${Btn}>
     </div>
   </div>`;
@@ -1123,6 +1212,9 @@ function App() {
     window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => { (async () => { const [s, m] = await Promise.all([getCap('sample'), getCap('mcp')]); setCaps({ sample: s, mcp: m }); })(); }, []);
+  // Gmail and Calendar need claude.ai connectors; without them the Google tab would be a dead end.
+  const tabs = TABS.filter(t => t.id !== 'workspace' || caps.mcp !== null);
+  useEffect(() => { if (!tabs.some(t => t.id === tab)) setTab('command'); }, [caps.mcp, tab]);
 
   const go = id => { setTab(id); try { history.replaceState(null, '', '#' + id); } catch (e) { location.hash = id; } window.scrollTo({ top: 0 }); };
   const openDeal = d => setDealEdit(d || {});
@@ -1132,7 +1224,7 @@ function App() {
 
   const dark = store.settings.theme !== 'light';
   const view = {
-    command: html`<${CommandView} store=${store} go=${go} openDeal=${openDeal} openInvoice=${openInvoice} />`,
+    command: html`<${CommandView} store=${store} caps=${caps} go=${go} openDeal=${openDeal} openInvoice=${openInvoice} />`,
     skills: html`<${SkillsView} store=${store} caps=${caps} toast=${toast} startDeal=${startDeal} />`,
     pipeline: html`<${PipelineView} store=${store} caps=${caps} toast=${toast} openDeal=${openDeal} openInvoice=${openInvoice} />`,
     money: html`<${MoneyView} store=${store} toast=${toast} openInvoice=${openInvoice} />`,
@@ -1157,11 +1249,11 @@ function App() {
             <button onClick=${() => store.saveSettings({ ...store.settings, theme: dark ? 'light' : 'dark' })} className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/10 text-lg" aria-label="Toggle day and night mode">${dark ? '☀️' : '🌙'}</button>
           </div>
         </div>
-        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${TABS.map(t => html`<button key=${t.id} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}</button>`)}</nav>
+        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${tabs.map(t => html`<button key=${t.id} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}</button>`)}</nav>
       </div>
     </header>
     <main className="max-w-6xl mx-auto px-4 py-5 pb-24">
-      ${store.mode === 'local' && html`<div className="mb-4 p-3 rounded-xl text-xs bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:border-amber-500/20">This view can't reach your saved data, so changes here won't be kept. Open the page on claude.ai while signed in.</div>`}
+      ${store.mode === 'local' && html`<div className="mb-4 p-3 rounded-xl text-xs bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:border-amber-500/20">This browser won't let Soulvee OS save data (private browsing?), so changes here won't be kept.</div>`}
       ${store.readOnly && html`<div className="mb-4 p-3 rounded-xl text-xs bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-200">You're viewing Soulvee OS read-only.</div>`}
       ${view}
     </main>
