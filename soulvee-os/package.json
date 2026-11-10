@@ -1,8 +1,8 @@
 {
   "name": "soulvee-os",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Soulvee OS: deals, invoices, money, offers, learning and an AI agent for the Soulvee brands.",
+  "description": "Soulvee OS: deals, invoices, money, offers, social content and an AI agent for the Soulvee brands.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,5 +11,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0"
   }
 }

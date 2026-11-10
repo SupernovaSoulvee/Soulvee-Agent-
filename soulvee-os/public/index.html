@@ -74,7 +74,7 @@ const MODELS = ['project', 'retainer', 'booking', 'product', 'course', 'licence'
 const SOURCES = ['Direct', 'Referral', 'WhatsApp', 'Instagram', 'TikTok', 'LinkedIn', 'Email', 'Radio', 'Event', 'Fiverr', 'Upwork', 'Freelancer.com', 'SoundBetter'];
 const METHODS = ['Moniepoint', 'Bank transfer', 'Paystack', 'Flutterwave', 'Stripe', 'PayPal', 'Cash', 'Selar', 'Gumroad', 'Spreadshop', 'Printify', 'TeePublic'];
 const CURRENCIES = ['NGN', 'USD', 'GBP', 'EUR'];
-const COLS = ['offers', 'deals', 'invoices', 'ledger', 'learning'];
+const COLS = ['offers', 'deals', 'invoices', 'ledger', 'learning', 'content'];
 
 const DEFAULT_SETTINGS = {
   theme: 'dark',
@@ -91,8 +91,9 @@ const DEFAULT_SETTINGS = {
     { name: 'Owner pay', pct: 15 },
   ],
   invoiceSeq: 2,
+  social: { brandChannels: {} },
 };
-const mergeSettings = s => ({ ...DEFAULT_SETTINGS, ...s, company: { ...DEFAULT_SETTINGS.company, ...(s && s.company) }, fx: { ...DEFAULT_SETTINGS.fx, ...(s && s.fx) }, alloc: (s && Array.isArray(s.alloc) && s.alloc.length) ? s.alloc : DEFAULT_SETTINGS.alloc });
+const mergeSettings = s => ({ ...DEFAULT_SETTINGS, ...s, company: { ...DEFAULT_SETTINGS.company, ...(s && s.company) }, fx: { ...DEFAULT_SETTINGS.fx, ...(s && s.fx) }, alloc: (s && Array.isArray(s.alloc) && s.alloc.length) ? s.alloc : DEFAULT_SETTINGS.alloc, social: { ...(s && s.social), brandChannels: { ...((s && s.social && s.social.brandChannels) || {}) } } });
 
 /* ---------------- helpers ---------------- */
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -174,10 +175,9 @@ function sampleMessage(e) {
   if (e.code === 'rate_limited') return 'Too many AI requests just now — wait a minute and try again.';
   return e.message || 'The assistant could not answer.';
 }
-async function askJSON(sample, prompt) {
-  if (typeof sample.json === 'function') {
-    try { const v = await sample.json(prompt); if (v && typeof v === 'object') return v; } catch (e) { if (e && e.code) throw e; }
-  }
+// With a JSON schema the reply is guaranteed to match it (structured outputs).
+async function askJSON(sample, prompt, schema, effort) {
+  if (typeof sample.json === 'function') return sample.json(prompt, schema, { effort: effort || 'medium' });
   const r = await sample(prompt);
   const m = (r.text || '').match(/\{[\s\S]*\}/);
   if (!m) throw { message: 'The AI did not return a usable offer. Try again.' };
@@ -394,8 +394,9 @@ function CommandView({ store, caps, go, openDeal, openInvoice }) {
       <//>
     </div>
 
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
       <${Btn} onClick=${() => openDeal(null)}>+ Deal</${Btn}>
+      <${Btn} kind="ghost" onClick=${() => go('content')}>Plan posts</${Btn}>
       <${Btn} kind="ghost" onClick=${() => openInvoice(null)}>+ Invoice</${Btn}>
       <${Btn} kind="ghost" onClick=${() => go('skills')}>Convert a skill</${Btn}>
       ${caps.mcp === null ? html`<${Btn} kind="ghost" onClick=${() => go('money')}>Log money</${Btn}>` : html`<${Btn} kind="ghost" onClick=${() => go('workspace')}>Gmail lead radar</${Btn}>`}
@@ -404,6 +405,14 @@ function CommandView({ store, caps, go, openDeal, openInvoice }) {
 }
 
 /* ---------------- Skills → Revenue ---------------- */
+const OFFER_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['name', 'pitch', 'model', 'tiers', 'channels', 'firstMove'],
+  properties: {
+    name: { type: 'string' }, pitch: { type: 'string' }, model: { type: 'string', enum: MODELS },
+    tiers: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['name', 'price', 'deliverables'], properties: { name: { type: 'string' }, price: { type: 'number' }, deliverables: { type: 'array', items: { type: 'string' } } } } },
+    channels: { type: 'array', items: { type: 'string' } }, firstMove: { type: 'string' },
+  },
+};
 function OfferModal({ offer, onClose, onSave }) {
   const [f, setF] = useState(() => ({
     brand: 'smc', name: '', pitch: '', model: 'project', status: 'idea', channels: '', firstMove: '',
@@ -443,7 +452,7 @@ function OfferModal({ offer, onClose, onSave }) {
   <//>`;
 }
 
-function SkillsView({ store, caps, toast, startDeal }) {
+function SkillsView({ store, caps, toast, startDeal, promote }) {
   const { data, add, update, remove } = store;
   const [brand, setBrand] = useState('all');
   const [conv, setConv] = useState({ brand: 'smc', skill: '', audience: '' });
@@ -470,7 +479,7 @@ Target client: ${conv.audience || 'best-fit buyers you identify'}
 Brand: ${brandOf(conv.brand).name}
 Return ONLY a JSON object, no prose:
 {"name": string (short offer name), "pitch": string (2 sentences in the brand voice), "model": one of ${JSON.stringify(MODELS)}, "tiers": [3 objects {"name": string, "price": number (Naira, whole number, realistic for Lagos SMEs/creatives in ${year}), "deliverables": [3-5 short strings]}], "channels": [2-4 strings: where to sell it], "firstMove": string (one concrete action to land the first paying client this week)}`;
-      const v = await askJSON(caps.sample, prompt);
+      const v = await askJSON(caps.sample, prompt, OFFER_SCHEMA, 'medium');
       setDraft({ brand: conv.brand, status: 'packaging', name: v.name || 'New offer', pitch: v.pitch || '', model: MODELS.includes(v.model) ? v.model : 'project', channels: Array.isArray(v.channels) ? v.channels : [], firstMove: v.firstMove || '', tiers: (v.tiers || []).map(t => ({ name: t.name || '', price: num(t.price), deliverables: Array.isArray(t.deliverables) ? t.deliverables : [], suggested: true })), source: 'ai', skill: conv.skill });
     } catch (e) { toast(sampleMessage(e)); }
     setBusy(false);
@@ -517,6 +526,7 @@ Return ONLY a JSON object, no prose:
           ${o.firstMove && html`<p className="text-[11px] mt-2"><span className="font-semibold">Next:</span> ${o.firstMove}</p>`}
           <div className="flex gap-2 mt-3 flex-wrap">
             <${Btn} small onClick=${() => startDeal(o)}>Start deal</${Btn}>
+            <${Btn} small kind="ghost" onClick=${() => promote(o)}>Promote</${Btn}>
             <${Btn} small kind="ghost" onClick=${() => setEditing(o)}>Edit</${Btn}>
             <select className=${inputCls + ' !w-auto !py-1.5 text-xs'} value=${o.status} onChange=${e => update('offers', o.id, { status: e.target.value })}>${OFFER_STATUS.map(st => html`<option key=${st} value=${st}>${st}</option>`)}</select>
             <${Btn} small kind="danger" onClick=${() => sure(`the offer "${o.name}"`) && remove('offers', o.id)}>Delete</${Btn}>
@@ -564,7 +574,7 @@ function FollowUpModal({ deal, offers, caps, toast, onClose, onDone }) {
     try {
       const r = await caps.sample(`${voiceFor(deal.brand)}
 Write a short follow-up email (under 150 words) from Soulvee to ${deal.client} about ${offer ? offer.name : 'our proposal'} worth ${ngn(deal.value)}. Stage: ${stageOf(deal.stage).name}. Next step we want: ${deal.nextStep || 'agree on next steps'}. Notes: ${deal.notes || 'none'}.
-Plain text only, no markdown, no subject line. Sign off as "Soulvee" with "Soulveetainment Media Consults · +2348069769446" on the line below. Do not invent prices or dates not given here.`, { cache: false });
+Plain text only, no markdown, no subject line. Sign off as "Soulvee" with "Soulveetainment Media Consults · +2348069769446" on the line below. Do not invent prices or dates not given here.`, { effort: 'low' });
       setBody((r.text || '').trim());
     } catch (e) { toast(sampleMessage(e)); }
     setBusy('');
@@ -682,6 +692,517 @@ function PipelineView({ store, caps, toast, openDeal, openInvoice }) {
     ${follow && html`<${FollowUpModal} deal=${follow} offers=${data.offers} caps=${caps} toast=${toast} onClose=${() => setFollow(null)} onDone=${() => setFollow(null)} />`}
     ${cal && html`<${CalendarModal} prefill=${cal} caps=${caps} toast=${toast} onClose=${() => setCal(null)} />`}
   </div>`;
+}
+
+/* ---------------- Content Studio ---------------- */
+const PLATFORMS = [
+  { id: 'instagram', name: 'Instagram', service: 'instagram', limit: 2200, media: 'any', url: 'https://www.instagram.com/' },
+  { id: 'tiktok', name: 'TikTok', service: 'tiktok', limit: 4000, media: 'any', url: 'https://www.tiktok.com/upload' },
+  { id: 'facebook', name: 'Facebook', service: 'facebook', limit: 63206, media: '', url: 'https://www.facebook.com/' },
+  { id: 'linkedin', name: 'LinkedIn', service: 'linkedin', limit: 3000, media: '', url: 'https://www.linkedin.com/feed/' },
+  { id: 'x', name: 'X', service: 'twitter', limit: 280, media: '', url: 'https://x.com/compose/post' },
+  { id: 'threads', name: 'Threads', service: 'threads', limit: 500, media: '', url: 'https://www.threads.net/' },
+  { id: 'youtube', name: 'YouTube Shorts', service: 'youtube', limit: 5000, media: 'video', url: 'https://studio.youtube.com/' },
+  { id: 'pinterest', name: 'Pinterest', service: 'pinterest', limit: 500, media: 'any', url: 'https://www.pinterest.com/pin-builder/' },
+];
+const platformOf = id => PLATFORMS.find(p => p.id === id) || PLATFORMS[0];
+const POST_STATUS = ['idea', 'draft', 'approved', 'scheduled', 'posted', 'failed'];
+const STATUS_TONE = { idea: 'slate', draft: 'blue', approved: 'violet', scheduled: 'amber', posted: 'green', failed: 'red' };
+const YT_CATEGORY = { dj: '10', efr: '10', emporium: '26', smc: '28', digital: '28' };
+const SERVICE_LABEL = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', linkedin: 'LinkedIn', twitter: 'X', threads: 'Threads', youtube: 'YouTube', pinterest: 'Pinterest', bluesky: 'Bluesky', mastodon: 'Mastodon', googlebusiness: 'Google Business', substack: 'Substack' };
+const CONTENT_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['posts'],
+  properties: {
+    posts: {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['title', 'caption', 'hashtags', 'platforms', 'format', 'visual', 'script', 'day', 'time'],
+        properties: {
+          title: { type: 'string' },
+          caption: { type: 'string' },
+          hashtags: { type: 'array', items: { type: 'string' } },
+          platforms: { type: 'array', items: { type: 'string', enum: PLATFORMS.map(p => p.id) } },
+          format: { type: 'string', enum: ['image', 'carousel', 'reel', 'story', 'text', 'video'] },
+          visual: { type: 'string' },
+          script: { type: 'string' },
+          day: { type: 'integer' },
+          time: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+const toLocalParts = iso => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? { date: localDate(d), time: hhmm(d) } : { date: '', time: '' }; };
+const fromLocalParts = (date, time) => { if (!date) return ''; const d = new Date(`${date}T${time || '10:00'}:00`); return isNaN(d) ? '' : d.toISOString(); };
+// "day" days from now at "time" (local); pushed a day later if that moment has already gone.
+const slotFor = (day, time) => {
+  const d = new Date();
+  d.setDate(d.getDate() + Math.max(0, Math.min(13, Math.round(num(day)))));
+  const m = String(time || '').match(/^(\d{1,2}):(\d{2})/);
+  d.setHours(m ? Math.min(23, +m[1]) : 10, m ? Math.min(59, +m[2]) : 0, 0, 0);
+  if (d.getTime() < Date.now() + 10 * 60000) d.setDate(d.getDate() + 1);
+  return d.toISOString();
+};
+const tagLine = tags => (tags || []).map(t => String(t).trim().replace(/^#+/, '').replace(/\s+/g, '')).filter(Boolean).map(t => '#' + t).join(' ');
+const fmtSlot = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+
+function postWarnings(p) {
+  const out = [];
+  const media = p.media || [];
+  const len = String(p.text || '').length;
+  if (!String(p.text || '').trim()) out.push('No caption yet');
+  if (!(p.platforms || []).length) out.push('Pick at least one platform');
+  (p.platforms || []).forEach(id => {
+    const pl = platformOf(id);
+    if (len > pl.limit) out.push(`Too long for ${pl.name} (${len}/${pl.limit})`);
+    if (pl.media === 'video' && !media.some(m => m.type === 'video')) out.push(`${pl.name} needs a video`);
+    if (pl.media === 'any' && !media.length) out.push(`${pl.name} needs an image or video`);
+  });
+  return out;
+}
+
+function shareLink(platform, text) {
+  const t = encodeURIComponent(text || '');
+  if (platform === 'x') return 'https://x.com/intent/post?text=' + t;
+  if (platform === 'threads') return 'https://www.threads.net/intent/post?text=' + t;
+  if (platform === 'linkedin') return 'https://www.linkedin.com/feed/?shareActive=true&text=' + t;
+  return platformOf(platform).url;
+}
+
+const copyText = async (t, toast) => { try { await navigator.clipboard.writeText(t); toast('Caption copied'); } catch (e) { toast('Copy blocked — select the text and copy it manually'); } };
+
+function PlatformToggles({ value, onChange }) {
+  return html`<div className="flex flex-wrap gap-1.5">${PLATFORMS.map(p => html`<button type="button" key=${p.id} onClick=${() => onChange(value.includes(p.id) ? value.filter(x => x !== p.id) : [...value, p.id])} className=${'px-2.5 py-1 rounded-full text-xs font-medium transition ' + (value.includes(p.id) ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300')}>${p.name}</button>`)}</div>`;
+}
+
+function PostModal({ post, caps, toast, onClose, onSave }) {
+  const [f, setF] = useState(() => {
+    const p = { brand: 'smc', title: '', text: '', platforms: ['instagram'], media: [], status: 'draft', scheduledAt: '', igType: '', ytCategory: '', firstComment: '', visual: '', script: '', notes: '', ...(post || {}) };
+    const parts = toLocalParts(p.scheduledAt);
+    return { ...p, media: (p.media || []).map(m => ({ ...m })), date: parts.date, time: parts.time || '10:00' };
+  });
+  const [ask, setAsk] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const setMedia = (i, k, v) => set('media', f.media.map((m, j) => j === i ? { ...m, [k]: v } : m));
+  const len = String(f.text || '').length;
+  const warnings = postWarnings({ ...f, media: f.media.filter(m => String(m.url).trim()) });
+
+  const polish = async () => {
+    if (!caps.sample || busy || !String(f.text).trim()) return;
+    setBusy(true);
+    try {
+      const names = f.platforms.map(id => platformOf(id).name).join(', ') || 'Instagram';
+      const limit = Math.min(2200, ...f.platforms.map(id => platformOf(id).limit));
+      const r = await caps.sample(`${voiceFor(f.brand)}
+Rewrite this social media caption for ${names}. ${ask.trim() ? 'Instruction: ' + ask.trim() + '.' : 'Make the hook stronger and the call to action clearer.'}
+Keep it under ${limit} characters including hashtags, and keep any hashtags at the end. Don't invent prices, dates, venues or names that aren't in the caption.
+Reply with only the new caption.
+
+Caption:
+${f.text}`, { effort: 'low' });
+      const text = String(r.text || '').trim();
+      if (text) set('text', text);
+    } catch (e) { toast(sampleMessage(e)); }
+    setBusy(false);
+  };
+
+  const save = () => {
+    const { date, time, ...rest } = f;
+    onSave({ ...rest, title: String(f.title).trim(), text: String(f.text).trim(), media: f.media.filter(m => String(m.url).trim()).map(m => ({ type: m.type === 'video' ? 'video' : 'image', url: String(m.url).trim() })), scheduledAt: fromLocalParts(date, time) });
+  };
+
+  return html`<${Modal} title=${post && post.id ? 'Edit post' : 'New post'} wide onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${save} disabled=${!String(f.text).trim()}>Save post</${Btn}>`}>
+    <div className="grid sm:grid-cols-2 gap-3">
+      <${Field} label="Brand"><${Select} value=${f.brand} onChange=${v => setF(p => ({ ...p, brand: v, ytCategory: p.ytCategory || '' }))} options=${brandOptions} /><//>
+      <${Field} label="Status"><${Select} value=${f.status} onChange=${v => set('status', v)} options=${POST_STATUS} /><//>
+      <${Field} label="Title (for you, not posted)" className="sm:col-span-2"><${Input} value=${f.title} onChange=${e => set('title', e.target.value)} placeholder="e.g. Friday gig teaser" /><//>
+      <div className="sm:col-span-2"><span className=${'block text-xs font-medium mb-1 ' + muted}>Platforms</span><${PlatformToggles} value=${f.platforms} onChange=${v => set('platforms', v)} /></div>
+      <${Field} label="Caption" className="sm:col-span-2"><${Area} rows="7" value=${f.text} onChange=${e => set('text', e.target.value)} placeholder="Hook first, then the message, call to action and hashtags." /><//>
+      <div className="sm:col-span-2 flex flex-wrap gap-1.5 -mt-1">${f.platforms.map(id => { const pl = platformOf(id); return html`<span key=${id} className=${'text-[11px] px-2 py-0.5 rounded-full ' + (len > pl.limit ? 'bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300' : 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300')}>${pl.name} ${len}/${pl.limit}</span>`; })}</div>
+      ${caps.sample && html`<div className="sm:col-span-2 flex gap-2"><input className=${inputCls} value=${ask} onChange=${e => setAsk(e.target.value)} placeholder="Optional: how to change it (shorter, more hype, add Pidgin…)" /><${Btn} kind="ghost" onClick=${polish} disabled=${busy || !String(f.text).trim()}>${busy ? 'Polishing…' : 'Polish with AI'}</${Btn}></div>`}
+      <div className="sm:col-span-2">
+        <div className="flex items-center justify-between mb-1"><span className=${'text-xs font-medium ' + muted}>Media (public links)</span><button type="button" className="text-xs text-violet-500 font-medium" onClick=${() => set('media', [...f.media, { type: 'image', url: '' }])}>+ Add media</button></div>
+        <div className="space-y-2">${f.media.map((m, i) => html`<div key=${i} className="flex gap-2"><select className=${inputCls + ' !w-28'} value=${m.type} onChange=${e => setMedia(i, 'type', e.target.value)}><option value="image">Image</option><option value="video">Video</option></select><input className=${inputCls} value=${m.url} onChange=${e => setMedia(i, 'url', e.target.value)} placeholder="https://res.cloudinary.com/…/flyer.jpg" /><button type="button" className="text-rose-500 text-xs px-1" onClick=${() => set('media', f.media.filter((_, j) => j !== i))}>✕</button></div>`)}</div>
+        <p className=${'text-[11px] mt-1 ' + muted}>Use a direct public link (Cloudinary, Cloudflare R2, your website). Google Drive and Dropbox share links won't work.</p>
+      </div>
+      <${Field} label="Date"><${Input} type="date" value=${f.date} onChange=${e => set('date', e.target.value)} /><//>
+      <${Field} label="Time"><${Input} type="time" value=${f.time} onChange=${e => set('time', e.target.value)} /><//>
+      ${f.platforms.includes('instagram') && html`<${Field} label="Instagram format"><${Select} value=${f.igType} onChange=${v => set('igType', v)} options=${[{ v: '', l: 'Automatic (reel for video)' }, { v: 'post', l: 'Feed post' }, { v: 'reel', l: 'Reel' }, { v: 'story', l: 'Story' }]} /><//>`}
+      ${(f.platforms.includes('instagram') || f.platforms.includes('linkedin')) && html`<${Field} label="First comment (Instagram, LinkedIn)"><${Input} value=${f.firstComment} onChange=${e => set('firstComment', e.target.value)} placeholder="Extra hashtags or a link" /><//>`}
+      <${Field} label="Visual brief" className="sm:col-span-2" hint="What the image or video should show — paste it into Canva, Higgsfield or brief a designer."><${Area} rows="2" value=${f.visual} onChange=${e => set('visual', e.target.value)} /><//>
+      <${Field} label="Video script" className="sm:col-span-2"><${Area} rows="3" value=${f.script} onChange=${e => set('script', e.target.value)} placeholder="Beats for a reel or short, with on-screen text" /><//>
+      <${Field} label="Notes" className="sm:col-span-2"><${Input} value=${f.notes} onChange=${e => set('notes', e.target.value)} /><//>
+    </div>
+    ${warnings.length > 0 && html`<div className="mt-3 text-xs text-amber-700 dark:text-amber-300 space-y-0.5">${warnings.map(w => html`<p key=${w}>⚠ ${w}</p>`)}</div>`}
+  <//>`;
+}
+
+function PublishModal({ post, social, channels, store, toast, onClose, onDone }) {
+  const services = (post.platforms || []).map(id => platformOf(id).service);
+  const usable = (channels || []).filter(c => services.includes(c.service));
+  const saved = ((store.settings.social || {}).brandChannels || {})[post.brand] || [];
+  const healthy = c => !c.isDisconnected && !c.isLocked;
+  const [target, setTarget] = useState(social.buffer && social.allowed ? 'buffer' : social.webhook && social.allowed ? 'webhook' : 'manual');
+  const [picked, setPicked] = useState(() => { const s = usable.filter(c => saved.includes(c.id) && healthy(c)).map(c => c.id); return s.length ? s : usable.filter(healthy).map(c => c.id); });
+  const future = !!post.scheduledAt && Date.parse(post.scheduledAt) > Date.now() + 60000;
+  const [when, setWhen] = useState(future ? 'scheduled' : 'now');
+  const [remember, setRemember] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState(null);
+  const warnings = postWarnings(post);
+  const tabs = [social.buffer && { v: 'buffer', l: 'Buffer' }, social.webhook && { v: 'webhook', l: 'Webhook' }, { v: 'manual', l: 'Post by hand' }].filter(Boolean);
+
+  const send = async () => {
+    setBusy(true);
+    const payload = { id: post.id, brand: post.brand, title: post.title, text: post.text, media: post.media || [], platforms: post.platforms || [], channels: picked, scheduledAt: when === 'scheduled' ? post.scheduledAt : null, igType: post.igType || '', firstComment: post.firstComment || '', ytCategory: post.ytCategory || YT_CATEGORY[post.brand] || '22', aiAssisted: !!post.aiAssisted };
+    try {
+      const out = await window.SoulveeOS.social.publish(payload, target);
+      const at = new Date().toISOString();
+      if (target === 'webhook') {
+        await onDone({ status: 'scheduled', publish: { target, at, when, jobId: out.job.id, runAt: out.job.runAt } });
+        toast(when === 'now' ? 'Sent to your webhook' : 'Queued — Soulvee OS sends it at the scheduled time');
+        onClose();
+      }
+      if (target === 'buffer') {
+        const ok = out.results.filter(r => r.ok);
+        setResults(out.results);
+        if (remember && ok.length) {
+          const latest = store.latestSettings();
+          const socialSettings = latest.social || { brandChannels: {} };
+          await store.saveSettings({ ...latest, social: { ...socialSettings, brandChannels: { ...(socialSettings.brandChannels || {}), [post.brand]: picked } } });
+        }
+        await onDone({ status: ok.length ? 'scheduled' : 'failed', publish: { target, at, when, results: out.results } });
+        if (ok.length === out.results.length) { toast(when === 'now' ? 'Sent to Buffer — it goes out in a moment' : 'Scheduled in Buffer'); onClose(); }
+      }
+    } catch (e) { toast(e.message); }
+    setBusy(false);
+  };
+
+  const footer = target === 'manual'
+    ? html`<${Btn} kind="ghost" onClick=${onClose}>Close</${Btn}><${Btn} kind="good" onClick=${async () => { await onDone({ status: 'posted', postedAt: new Date().toISOString(), publish: { target: 'manual', at: new Date().toISOString() } }); toast('Marked as posted'); onClose(); }}>I've posted it</${Btn}>`
+    : html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${send} disabled=${busy || !social.allowed || (target === 'buffer' && !picked.length)}>${busy ? 'Sending…' : target === 'buffer' ? (when === 'now' ? 'Post now via Buffer' : 'Schedule in Buffer') : (when === 'now' ? 'Send to webhook now' : 'Queue for webhook')}</${Btn}>`;
+
+  return html`<${Modal} title=${'Publish · ' + (post.title || 'post')} onClose=${onClose} footer=${footer}>
+    <div className="space-y-4">
+      <${Chips} value=${target} onChange=${setTarget} options=${tabs} />
+      ${!social.allowed && target !== 'manual' && html`<p className="text-xs text-amber-700 dark:text-amber-300">Publishing is locked here. Open Soulvee OS on the computer that runs it, or set SOULVEE_ACCESS_TOKEN on the server and open the app once with ?token=YOUR_TOKEN.</p>`}
+      ${target !== 'manual' && html`<div className="flex flex-wrap gap-4 text-sm">
+        ${future && html`<label className="flex items-center gap-2"><input type="radio" name="when" checked=${when === 'scheduled'} onChange=${() => setWhen('scheduled')} /> ${fmtSlot(post.scheduledAt)}</label>`}
+        <label className="flex items-center gap-2"><input type="radio" name="when" checked=${when === 'now'} onChange=${() => setWhen('now')} /> Now</label>
+        ${!future && html`<span className=${'text-xs ' + muted}>Set a date and time on the post to schedule it.</span>`}
+      </div>`}
+      ${target === 'buffer' && html`<div>
+        <p className=${'text-xs font-medium mb-2 ' + muted}>Buffer channels</p>
+        ${usable.length === 0 ? html`<p className="text-sm text-amber-700 dark:text-amber-300">None of your Buffer channels match this post's platforms (${(post.platforms || []).map(id => platformOf(id).name).join(', ')}). Connect them in Buffer, or change the platforms.</p>` : html`<div className="space-y-1.5">${usable.map(c => html`<label key=${c.id} className="flex items-center gap-2 text-sm p-2 rounded-xl bg-slate-50 dark:bg-white/5">
+          <input type="checkbox" disabled=${!healthy(c)} checked=${picked.includes(c.id)} onChange=${e => setPicked(p => e.target.checked ? [...p, c.id] : p.filter(x => x !== c.id))} />
+          ${c.avatar ? html`<img src=${c.avatar} alt="" className="w-6 h-6 rounded-full" />` : null}
+          <span className="flex-1 min-w-0 truncate">${c.displayName || c.name} <span className=${muted}>· ${SERVICE_LABEL[c.service] || c.service}</span></span>
+          ${c.isDisconnected && html`<${Pill} tone="red">disconnected</${Pill}>`}${c.isLocked && html`<${Pill} tone="red">locked</${Pill}>`}${c.isQueuePaused && html`<${Pill} tone="amber">queue paused</${Pill}>`}
+        </label>`)}</div>`}
+        <label className="flex items-center gap-2 text-xs mt-2"><input type="checkbox" checked=${remember} onChange=${e => setRemember(e.target.checked)} /> Use these channels for ${brandOf(post.brand).short} next time</label>
+      </div>`}
+      ${target === 'webhook' && html`<p className=${'text-sm ' + muted}>Soulvee OS sends this post to your Make, Zapier or n8n webhook ${when === 'now' ? 'straight away' : 'at the scheduled time'}, and that scenario posts it. The server must be running then.</p>`}
+      ${target === 'manual' && html`<div className="space-y-3">
+        <textarea readOnly rows="6" className=${inputCls + ' text-xs'} value=${post.text} onFocus=${e => e.target.select()}></textarea>
+        <div className="flex flex-wrap gap-2"><${Btn} small onClick=${() => copyText(post.text, toast)}>Copy caption</${Btn}>${(post.platforms || []).map(id => html`<a key=${id} href=${shareLink(id, post.text)} target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Open ${platformOf(id).name}</a>`)}</div>
+        ${(post.media || []).length > 0 && html`<div className="text-xs space-y-1">${post.media.map((m, i) => html`<a key=${i} href=${m.url} target="_blank" rel="noopener" className="block truncate text-violet-500">${m.type}: ${m.url}</a>`)}</div>`}
+        <p className=${'text-xs ' + muted}>X, Threads and LinkedIn open with the caption filled in. For the others, copy the caption first.</p>
+      </div>`}
+      ${warnings.length > 0 && target !== 'manual' && html`<div className="text-xs text-amber-700 dark:text-amber-300 space-y-0.5">${warnings.map(w => html`<p key=${w}>⚠ ${w}</p>`)}</div>`}
+      ${results && html`<div className="space-y-1">${results.map(r => html`<p key=${r.channelId} className=${'text-xs ' + (r.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>${r.ok ? '✓' : '✕'} ${r.name || r.channelId}${r.service ? ' (' + (SERVICE_LABEL[r.service] || r.service) + ')' : ''}: ${r.ok ? (r.dueAt ? 'scheduled for ' + fmtSlot(r.dueAt) : 'accepted') : r.message}</p>`)}</div>`}
+    </div>
+  <//>`;
+}
+
+function ContentView({ store, caps, toast, prefill, clearPrefill }) {
+  const { data, add, update, remove } = store;
+  const ref = useRef(store); ref.current = store;
+  const [social, setSocial] = useState(null);
+  const [channels, setChannels] = useState([]);
+  const [chanErr, setChanErr] = useState('');
+  const [filter, setFilter] = useState('active');
+  const [brand, setBrand] = useState('all');
+  const [editing, setEditing] = useState(null);
+  const [publishing, setPublishing] = useState(null);
+  const [gen, setGen] = useState({ brand: 'dj', goal: '', platforms: ['instagram', 'tiktok'], count: '5', offerId: '' });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { if (prefill) { setGen(g => ({ ...g, ...prefill })); clearPrefill(); window.scrollTo({ top: 0 }); } }, [prefill]);
+  useEffect(() => {
+    let alive = true;
+    window.SoulveeOS.social.status().then(s => {
+      if (!alive) return;
+      setSocial(s);
+      if (s.buffer && s.allowed) window.SoulveeOS.social.channels(false).then(r => { if (alive) setChannels(r.channels); }, e => { if (alive) setChanErr(e.message); });
+    }, () => { if (alive) setSocial({ buffer: false, webhook: false, allowed: false, offline: true }); });
+    return () => { alive = false; };
+  }, []);
+
+  // Webhook posts: mark them posted (or failed) once the server has delivered them.
+  const pendingKey = data.content.filter(p => p.status === 'scheduled' && p.publish && p.publish.jobId).map(p => p.publish.jobId).join(',');
+  useEffect(() => {
+    if (!pendingKey) return undefined;
+    const check = () => window.SoulveeOS.social.jobs(pendingKey.split(',')).then(r => r.jobs.forEach(j => {
+      const p = ref.current.data.content.find(x => x.publish && x.publish.jobId === j.id);
+      if (!p || p.status !== 'scheduled') return;
+      if (j.status === 'sent') ref.current.update('content', p.id, { status: 'posted', postedAt: j.sentAt });
+      if (j.status === 'failed') ref.current.update('content', p.id, { status: 'failed', publish: { ...p.publish, error: j.error } });
+      if (j.status === 'cancelled') ref.current.update('content', p.id, { status: 'approved' });
+    }), () => {});
+    check();
+    const timer = setInterval(check, 15000);
+    return () => clearInterval(timer);
+  }, [pendingKey]);
+
+  const brandOffers = data.offers.filter(o => o.brand === gen.brand && o.status !== 'retired');
+  const generate = async () => {
+    if (!caps.sample || busy) return;
+    const offer = data.offers.find(o => o.id === gen.offerId);
+    const count = Math.max(1, Math.min(14, Math.round(num(gen.count)) || 5));
+    const platforms = gen.platforms.length ? gen.platforms : ['instagram'];
+    setBusy(true);
+    try {
+      const tiers = offer ? (offer.tiers || []).filter(t => num(t.price) > 0).map(t => `${t.name} ${ngn(t.price)}`).join(', ') : '';
+      const prompt = `${voiceFor(gen.brand)}
+You are also the social media content lead for ${brandOf(gen.brand).name}. The audience is Lagos-first with global reach; Nigerian English or light Pidgin is welcome where it fits the brand.
+Today is ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}.
+Goal: ${gen.goal.trim() || 'grow the audience and bring in paying clients'}.
+${offer ? `Promote this offer: ${offer.name}. ${offer.pitch || ''}${tiers ? ' Prices: ' + tiers + '.' : ''}` : ''}
+Platforms to cover: ${platforms.map(id => platformOf(id).name).join(', ')}.
+Write ${count} distinct posts for the next ${Math.min(14, Math.max(7, count))} days, spread across those platforms, with a mix of formats (reels or short videos, carousels, single images, stories, text).
+- caption: ready to post, starting with a scroll-stopping hook, written in the brand voice, with one clear call to action (DM, link in bio, book, buy). No hashtags inside the caption.
+- Any post that includes X must keep caption plus hashtags under 270 characters; Threads under 480. Other captions up to about 150 words.
+- hashtags: 3 to 8 relevant tags without the # sign, mixing broad and Lagos or Nigeria-specific ones (at most 3 if the post includes LinkedIn).
+- visual: a short brief a designer or an image tool can follow (subject, setting, colours, text overlay).
+- script: for reels and short videos, 4 to 6 timed beats with on-screen text; otherwise an empty string.
+- day: days from today (0 to 13). time: a good local posting time for that platform and audience, as HH:MM in 24-hour time.
+- Never invent prices, dates, venues, guests or client names that aren't given here.`;
+      const v = await askJSON(caps.sample, prompt, CONTENT_SCHEMA, 'medium');
+      const items = (Array.isArray(v.posts) ? v.posts : []).slice(0, 14);
+      for (const p of items) {
+        const chosen = (p.platforms || []).filter(id => PLATFORMS.some(x => x.id === id));
+        const tags = tagLine(p.hashtags);
+        await add('content', {
+          brand: gen.brand, title: String(p.title || '').trim() || 'Post idea', text: [String(p.caption || '').trim(), tags].filter(Boolean).join('\n\n'),
+          platforms: chosen.length ? chosen : platforms, format: p.format || '', visual: p.visual || '', script: p.script || '',
+          media: [], status: 'draft', scheduledAt: slotFor(p.day, p.time), igType: p.format === 'story' ? 'story' : p.format === 'reel' ? 'reel' : '',
+          ytCategory: YT_CATEGORY[gen.brand] || '22', firstComment: '', notes: '', aiAssisted: true,
+          source: offer ? { type: 'offer', id: offer.id, label: offer.name } : { type: 'topic', label: gen.goal.trim() },
+        });
+      }
+      toast(items.length ? `${items.length} drafts added — review and approve them below` : 'The AI returned no posts. Try again.');
+      setFilter('active');
+    } catch (e) { toast(sampleMessage(e)); }
+    setBusy(false);
+  };
+
+  const savePost = async v => {
+    if (editing && editing.id) await update('content', editing.id, v);
+    else await add('content', { aiAssisted: false, ...v });
+    setEditing(null);
+    toast('Post saved');
+  };
+  const cancelJob = async p => {
+    try { await window.SoulveeOS.social.cancel(p.publish.jobId); await update('content', p.id, { status: 'approved' }); toast('Scheduled post cancelled'); }
+    catch (e) { toast(e.message); }
+  };
+
+  const visible = data.content.filter(p => (brand === 'all' || p.brand === brand) && (filter === 'all' || (filter === 'posted' ? p.status === 'posted' : p.status !== 'posted')));
+  const sorted = [...visible].sort((a, b) => String(a.scheduledAt || '9999').localeCompare(String(b.scheduledAt || '9999')) || String(a.createdAt).localeCompare(String(b.createdAt)));
+  const groups = [];
+  sorted.forEach(p => {
+    const key = p.scheduledAt ? localDate(new Date(p.scheduledAt)) : '';
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) last.items.push(p);
+    if (!last || last.key !== key) groups.push({ key, items: [p] });
+  });
+  const dayLabel = key => !key ? 'Not scheduled yet' : key === localDate() ? 'Today' : key === addDays(localDate(), 1) ? 'Tomorrow' : new Date(key + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+  const counts = POST_STATUS.map(st => ({ st, n: data.content.filter(p => p.status === st).length }));
+  const connection = !social ? 'Checking publishing…' : social.offline ? 'Server unreachable — copy and post by hand' : [social.buffer && `Buffer${channels.length ? ' · ' + channels.length + ' channels' : ''}`, social.webhook && 'Webhook'].filter(Boolean).join(' + ') || 'Copy and post by hand (connect Buffer in Setup)';
+
+  return html`<div className="space-y-6">
+    <${Section} title="Content Studio" sub="Plan, write and publish posts for every brand — AI drafts, you approve." action=${html`<${Btn} small onClick=${() => setEditing({ brand: gen.brand, platforms: gen.platforms.length ? gen.platforms : ['instagram'] })}>+ Post</${Btn}>`}>
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">${counts.map(c => html`<div key=${c.st} className="rounded-xl p-3 bg-white border border-slate-200 dark:bg-white/[0.04] dark:border-white/10 text-center"><p className="text-lg font-bold">${c.n}</p><p className=${'text-[11px] capitalize ' + muted}>${c.st}</p></div>`)}</div>
+      <p className=${'text-xs ' + muted}>Publishing: <span className="font-medium">${connection}</span>${chanErr ? html` · <span className="text-rose-500">${chanErr}</span>` : ''}</p>
+    <//>
+
+    <${Card} className="glow">
+      <p className="font-semibold text-sm mb-1">✦ AI content generator</p>
+      <p className=${'text-xs mb-3 ' + muted}>Writes captions, hashtags, visual briefs and video scripts in the brand's voice, and spreads them over the next two weeks. Everything lands as a draft for you to check.</p>
+      ${caps.sample === null ? html`<p className="text-sm text-amber-600 dark:text-amber-400">${aiOffText()} You can still write posts by hand with + Post.</p>` : html`
+      <div className="grid sm:grid-cols-3 gap-3">
+        <${Field} label="Brand"><${Select} value=${gen.brand} onChange=${v => setGen({ ...gen, brand: v, offerId: '' })} options=${brandOptions} /><//>
+        <${Field} label="Goal or topic" className="sm:col-span-2"><${Input} value=${gen.goal} onChange=${e => setGen({ ...gen, goal: e.target.value })} placeholder="e.g. Fill my December wedding bookings" /><//>
+        <${Field} label="Promote an offer (optional)"><${Select} value=${gen.offerId} onChange=${v => setGen({ ...gen, offerId: v })} options=${[{ v: '', l: '— none —' }, ...brandOffers.map(o => ({ v: o.id, l: o.name }))]} /><//>
+        <${Field} label="How many posts"><${Select} value=${String(gen.count)} onChange=${v => setGen({ ...gen, count: v })} options=${['3', '5', '7', '10', '14']} /><//>
+        <div className="sm:col-span-3"><span className=${'block text-xs font-medium mb-1 ' + muted}>Platforms</span><${PlatformToggles} value=${gen.platforms} onChange=${v => setGen({ ...gen, platforms: v })} /></div>
+      </div>
+      <div className="mt-3 flex gap-2 flex-wrap">
+        <${Btn} onClick=${generate} disabled=${busy || !gen.platforms.length}>${busy ? 'Writing posts…' : 'Generate posts'}</${Btn}>
+        <button type="button" onClick=${() => setGen({ ...gen, goal: 'Plan a full week of content: one post a day', count: '7' })} className="text-xs px-3 py-1.5 rounded-full bg-slate-100 dark:bg-white/10">Plan my week</button>
+        <button type="button" onClick=${() => setGen({ ...gen, brand: 'dj', goal: 'Announce my next gig and get people to come out', count: '3', platforms: ['instagram', 'tiktok', 'x'] })} className="text-xs px-3 py-1.5 rounded-full bg-slate-100 dark:bg-white/10">Gig announcement</button>
+        <button type="button" onClick=${() => setGen({ ...gen, brand: 'smc', goal: 'Show Lagos restaurants and hotels how AI automation saves them time and money', count: '5', platforms: ['linkedin', 'instagram', 'x'] })} className="text-xs px-3 py-1.5 rounded-full bg-slate-100 dark:bg-white/10">SMC thought leadership</button>
+      </div>`}
+    <//>
+
+    <${Section} title="Content plan" action=${html`<${Chips} value=${filter} onChange=${setFilter} options=${[{ v: 'active', l: 'To do' }, { v: 'posted', l: 'Posted' }, { v: 'all', l: 'All' }]} />`}>
+      <${Chips} value=${brand} onChange=${setBrand} options=${[{ v: 'all', l: 'All brands' }, ...BRANDS.map(b => ({ v: b.id, l: b.short }))]} />
+      ${groups.length === 0 ? html`<${Card}><${Empty} title="Nothing planned yet">Generate posts above, or write one with + Post.<//><//>` : groups.map(g => html`<div key=${g.key || 'none'} className="space-y-2">
+        <p className=${'text-xs font-semibold uppercase tracking-wide ' + muted}>${dayLabel(g.key)}</p>
+        <div className="grid md:grid-cols-2 gap-3">${g.items.map(p => {
+          const warn = postWarnings(p);
+          const res = (p.publish && p.publish.results) || [];
+          const img = (p.media || []).find(m => m.type === 'image');
+          return html`<${Card} key=${p.id}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-semibold truncate">${p.title || 'Untitled post'}</p>
+                <div className="flex gap-1.5 mt-1 flex-wrap"><${BrandChip} id=${p.brand} /><${Pill} tone=${STATUS_TONE[p.status] || 'slate'}>${p.status}</${Pill}>${(p.platforms || []).map(id => html`<${Pill} key=${id}>${platformOf(id).name}</${Pill}>`)}</div>
+              </div>
+              <div className="text-right shrink-0 text-[11px]">${p.scheduledAt ? html`<p className="font-semibold">${hhmm(new Date(p.scheduledAt))}</p>` : null}${p.aiAssisted && html`<p className=${muted}>AI draft</p>`}</div>
+            </div>
+            <div className="flex gap-3 mt-2">
+              ${img && html`<img src=${img.url} alt="" className="w-16 h-16 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-white/10" />`}
+              <p className="text-xs whitespace-pre-wrap line-clamp-4 flex-1 min-w-0">${p.text}</p>
+            </div>
+            ${p.visual && html`<p className=${'text-[11px] mt-2 line-clamp-2 ' + muted}><span className="font-semibold">Visual:</span> ${p.visual}</p>`}
+            ${warn.length > 0 && p.status !== 'posted' && html`<p className="text-[11px] mt-2 text-amber-700 dark:text-amber-300">⚠ ${warn.join(' · ')}</p>`}
+            ${p.status === 'scheduled' && p.publish && html`<p className=${'text-[11px] mt-2 ' + muted}>${p.publish.target === 'buffer' ? `In Buffer · ${res.filter(r => r.ok).length}/${res.length} channels${p.publish.when === 'now' ? ' · posting now' : ''}` : `Webhook · ${p.publish.when === 'now' ? 'sending now' : 'sends ' + fmtSlot(p.publish.runAt || p.scheduledAt)}`}</p>`}
+            ${(p.status === 'failed' || res.some(r => !r.ok)) && html`<div className="text-[11px] mt-2 text-rose-600 dark:text-rose-400">${res.filter(r => !r.ok).map(r => html`<p key=${r.channelId}>✕ ${r.name || SERVICE_LABEL[r.service] || r.channelId}: ${r.message}</p>`)}${p.publish && p.publish.error ? html`<p>✕ ${p.publish.error}</p>` : null}</div>`}
+            <div className="flex gap-2 mt-3 flex-wrap">
+              ${['idea', 'draft'].includes(p.status) && html`<${Btn} small onClick=${() => update('content', p.id, { status: 'approved' })}>Approve</${Btn}>`}
+              ${['approved', 'failed'].includes(p.status) && html`<${Btn} small onClick=${() => setPublishing(p)}>${p.status === 'failed' ? 'Try again' : 'Publish…'}</${Btn}>`}
+              ${p.status === 'scheduled' && p.publish && p.publish.jobId && html`<${Btn} small kind="ghost" onClick=${() => cancelJob(p)}>Cancel</${Btn}>`}
+              ${p.status === 'scheduled' && p.publish && p.publish.target === 'buffer' && html`<a href="https://publish.buffer.com" target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Open Buffer</a>`}
+              ${p.status === 'scheduled' && html`<${Btn} small kind="good" onClick=${() => update('content', p.id, { status: 'posted', postedAt: new Date().toISOString() })}>Mark posted</${Btn}>`}
+              <${Btn} small kind="ghost" onClick=${() => copyText(p.text, toast)}>Copy</${Btn}>
+              <${Btn} small kind="ghost" onClick=${() => setEditing(p)}>Edit</${Btn}>
+              ${p.status === 'posted' && html`<${Btn} small kind="ghost" onClick=${async () => { await add('content', { ...p, id: undefined, createdAt: undefined, status: 'draft', scheduledAt: '', publish: null, postedAt: null, title: (p.title || 'Post') + ' (again)' }); toast('Copied as a new draft'); }}>Reuse</${Btn}>`}
+              <${Btn} small kind="danger" onClick=${() => sure(`the post "${p.title || 'untitled'}"`) && remove('content', p.id)}>Delete</${Btn}>
+            </div>
+          <//>`;
+        })}</div>
+      </div>`)}
+    <//>
+    ${editing && html`<${PostModal} post=${editing} caps=${caps} toast=${toast} onClose=${() => setEditing(null)} onSave=${savePost} />`}
+    ${publishing && social && html`<${PublishModal} post=${publishing} social=${social} channels=${channels} store=${store} toast=${toast} onClose=${() => setPublishing(null)} onDone=${patch => update('content', publishing.id, patch)} />`}
+  </div>`;
+}
+
+/* ---------------- Setup: AI check and social publishing ---------------- */
+function AiCheck({ caps }) {
+  const [state, setState] = useState(null);
+  const run = async () => {
+    setState({ busy: true });
+    try { setState(await window.SoulveeOS.aiTest()); }
+    catch (e) { setState({ ok: false, message: e.message }); }
+  };
+  return html`<${Card}>
+    <div className="flex items-center justify-between gap-2 flex-wrap"><p className="font-semibold text-sm">AI connection</p><${Btn} small kind="ghost" onClick=${run} disabled=${state && state.busy}>${state && state.busy ? 'Testing…' : 'Test AI'}</${Btn}></div>
+    <p className=${'text-xs mt-1 ' + muted}>${caps.sample ? 'AI is on. The test sends one tiny request to Claude to confirm the key and model work.' : aiOffText()}</p>
+    ${state && !state.busy && html`<p className=${'text-sm mt-2 ' + (state.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>${state.ok ? `✓ Working — ${state.model} replied "${state.text || '(no text)'}"` : '✕ ' + (state.message || 'The test failed.')}</p>`}
+  <//>`;
+}
+
+function SocialSetup({ store, toast }) {
+  const [status, setStatus] = useState(null);
+  const [channels, setChannels] = useState([]);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState('');
+  const load = async refresh => {
+    setBusy('load'); setErr('');
+    try {
+      const s = await window.SoulveeOS.social.status();
+      setStatus(s);
+      if (s.buffer && s.allowed) setChannels((await window.SoulveeOS.social.channels(refresh)).channels);
+    } catch (e) { setErr(e.message); }
+    setBusy('');
+  };
+  useEffect(() => { load(false); }, []);
+  const map = ((store.settings.social || {}).brandChannels) || {};
+  const toggle = (brand, id) => {
+    const latest = store.latestSettings();
+    const socialSettings = latest.social || { brandChannels: {} };
+    const current = (socialSettings.brandChannels || {})[brand] || [];
+    const next = current.includes(id) ? current.filter(x => x !== id) : [...current, id];
+    store.saveSettings({ ...latest, social: { ...socialSettings, brandChannels: { ...(socialSettings.brandChannels || {}), [brand]: next } } });
+  };
+  const testHook = async () => {
+    setBusy('hook');
+    try { const r = await window.SoulveeOS.social.testWebhook(); toast(r.ok ? 'Test post sent — check your scenario received it' : r.message); }
+    catch (e) { toast(e.message); }
+    setBusy('');
+  };
+  const row = (label, value, ok) => html`<div className="flex justify-between gap-3 text-sm py-1.5 border-b last:border-0 border-slate-100 dark:border-white/5"><span>${label}</span><span className=${ok ? 'text-emerald-600 dark:text-emerald-400 font-medium' : muted}>${value}</span></div>`;
+  return html`<${Card}>
+    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap"><p className="font-semibold text-sm">Social publishing</p><${Btn} small kind="ghost" onClick=${() => load(true)} disabled=${!!busy}>${busy === 'load' ? 'Checking…' : 'Refresh'}</${Btn}></div>
+    ${err && html`<p className="text-sm text-rose-600 dark:text-rose-400 mb-2">${err}</p>`}
+    ${status && html`<div>
+      ${row('Buffer (Instagram, TikTok, Facebook, LinkedIn, X, Threads, YouTube, Pinterest)', status.buffer ? 'Connected' : 'Not set up', status.buffer)}
+      ${row('Webhook (Make, Zapier, n8n)', status.webhook ? (status.signed ? 'On · signed' : 'On') : 'Not set up', status.webhook)}
+      ${row('Publishing from this device', status.allowed ? 'Allowed' : 'Locked', status.allowed)}
+    </div>`}
+    ${status && !status.buffer && !status.webhook && html`<p className=${'text-xs mt-3 ' + muted}>To post automatically, add BUFFER_API_KEY (from Buffer → Settings → API) or SOCIAL_WEBHOOK_URL to the server's .env and restart it. Until then, posts can be copied and posted by hand. The README has the steps.</p>`}
+    ${status && !status.allowed && (status.buffer || status.webhook) && html`<p className="text-xs mt-3 text-amber-700 dark:text-amber-300">Publishing works only from the computer running Soulvee OS until SOULVEE_ACCESS_TOKEN is set. Then open the app once with ?token=YOUR_TOKEN on each device.</p>`}
+    ${status && status.webhook && status.allowed && html`<div className="mt-3"><${Btn} small kind="ghost" onClick=${testHook} disabled=${!!busy}>${busy === 'hook' ? 'Sending…' : 'Send a test post to the webhook'}</${Btn}></div>`}
+    ${channels.length > 0 && html`<div className="mt-4">
+      <p className=${'text-xs font-medium mb-2 ' + muted}>Default Buffer channels for each brand</p>
+      <div className="overflow-x-auto"><table className="text-xs w-full">
+        <thead><tr><th className="text-left font-medium pr-2 pb-1">Channel</th>${BRANDS.map(b => html`<th key=${b.id} className="font-medium px-1 pb-1">${b.short}</th>`)}</tr></thead>
+        <tbody>${channels.map(c => html`<tr key=${c.id} className="border-t border-slate-100 dark:border-white/5">
+          <td className="py-1.5 pr-2 whitespace-nowrap">${c.displayName || c.name} <span className=${muted}>· ${SERVICE_LABEL[c.service] || c.service}</span>${c.isDisconnected ? html` <span className="text-rose-500">disconnected</span>` : ''}</td>
+          ${BRANDS.map(b => html`<td key=${b.id} className="text-center px-1"><input type="checkbox" aria-label=${(c.displayName || c.name) + ' for ' + b.short} checked=${(map[b.id] || []).includes(c.id)} onChange=${() => toggle(b.id, c.id)} /></td>`)}
+        </tr>`)}</tbody>
+      </table></div>
+    </div>`}
+  <//>`;
+}
+
+/* ---------------- Printable invoice ---------------- */
+function printInvoice(inv, settings) {
+  const t = invTotals(inv, settings);
+  const c = settings.company;
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const w = window.open('', '_blank');
+  if (!w) return false;
+  const rows = (inv.items || []).map(i => `<tr><td>${esc(i.desc)}</td><td class="r">${esc(ngn(i.amount))}</td></tr>`).join('');
+  w.document.write(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${esc(inv.number)}</title><style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: Inter, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; color: #111827; margin: 0; font-size: 13px; }
+    .bar { height: 6px; background: linear-gradient(90deg, #7c3aed, #c026d3); border-radius: 3px; margin-bottom: 24px; }
+    .top { display: flex; justify-content: space-between; gap: 24px; }
+    h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.02em; } .muted { color: #6b7280; } .r { text-align: right; }
+    .co { font-weight: 700; font-size: 15px; } table { width: 100%; border-collapse: collapse; margin-top: 28px; }
+    th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; border-bottom: 2px solid #111827; padding: 8px 0; }
+    td { padding: 10px 0; border-bottom: 1px solid #e5e7eb; vertical-align: top; } .totals { margin-left: auto; width: 300px; margin-top: 16px; }
+    .totals div { display: flex; justify-content: space-between; padding: 5px 0; } .grand { font-weight: 800; font-size: 16px; border-top: 2px solid #111827; margin-top: 4px; padding-top: 8px !important; }
+    .box { margin-top: 28px; padding: 14px 16px; background: #f5f3ff; border-radius: 10px; } .foot { margin-top: 36px; font-size: 11px; }
+    @media print { .noprint { display: none; } }
+  </style></head><body>
+    <div class="bar"></div>
+    <div class="top">
+      <div><p class="co">${esc(c.name)}</p><p class="muted">${esc(c.bn)}<br>${esc(c.address)}<br>${esc(c.phone)} · ${esc(c.email)}</p></div>
+      <div class="r"><h1>Invoice</h1><p><b>${esc(inv.number)}</b></p><p class="muted">Issued ${esc(fmtDate(inv.issueDate))}<br>Due ${esc(fmtDate(inv.dueDate))}</p></div>
+    </div>
+    <p style="margin-top:24px" class="muted">Bill to</p><p><b>${esc(inv.client)}</b>${inv.clientEmail ? '<br>' + esc(inv.clientEmail) : ''}</p>
+    <table><thead><tr><th>Description</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="totals">
+      <div><span class="muted">Subtotal</span><span>${esc(ngn(t.sub))}</span></div>
+      <div><span class="muted">VAT (${inv.vat ? esc(settings.vatRate) : 0}%)</span><span>${esc(ngn(t.vat))}</span></div>
+      <div class="grand"><span>Total</span><span>${esc(ngn(t.total))}</span></div>
+      ${t.wht > 0 ? `<div><span class="muted">Less WHT (${esc(inv.wht)}%)</span><span>−${esc(ngn(t.wht))}</span></div><div><b>Amount payable</b><b>${esc(ngn(t.net))}</b></div>` : ''}
+    </div>
+    <div class="box"><b>Payment</b><br>${esc(c.payment)}${inv.notes ? `<br><br><b>Notes</b><br>${esc(inv.notes)}` : ''}</div>
+    <p class="foot muted">Thank you for your business.${t.wht > 0 ? ' Please send the WHT credit note for the amount deducted.' : ''}</p>
+    <p class="noprint muted" style="margin-top:24px">Choose "Save as PDF" in the print window to get a PDF.</p>
+  </body></html>`);
+  w.document.close();
+  setTimeout(() => { w.focus(); w.print(); }, 350);
+  return true;
 }
 
 /* ---------------- Money ---------------- */
@@ -852,6 +1373,7 @@ function MoneyView({ store, toast, openInvoice }) {
           <div className="flex gap-2 mt-3 flex-wrap">
             ${st === 'draft' && html`<${Btn} small onClick=${() => update('invoices', inv.id, { status: 'sent' })}>Mark sent</${Btn}>`}
             ${st !== 'paid' && html`<${Btn} small kind="good" onClick=${() => setPaying(inv)}>Mark paid</${Btn}>`}
+            <${Btn} small kind="ghost" onClick=${() => { if (!printInvoice(inv, settings)) toast('Allow pop-ups for Soulvee OS to open the PDF'); }}>PDF</${Btn}>
             <${Btn} small kind="ghost" onClick=${() => setText(invoiceText(inv, settings))}>Invoice text</${Btn}>
             <${Btn} small kind="ghost" onClick=${() => openInvoice(inv)}>Edit</${Btn}>
             ${st === 'paid' && html`<${Btn} small kind="ghost" onClick=${() => unpay(inv)}>Undo paid</${Btn}>`}
@@ -1012,12 +1534,16 @@ function AssistantView({ store, caps, toast }) {
       execute: async a => { await ref.current.add('offers', { name: a.name, brand: a.brand, pitch: a.pitch || '', model: a.model || 'project', status: 'packaging', channels: [], firstMove: '', tiers: (a.tiers || []).map(t => ({ name: t.name || '', price: num(t.price), deliverables: t.deliverables || [], suggested: true })) }); setActs(x => [...x, `Saved offer: ${a.name}`]); return { ok: true }; } },
     { name: 'create_draft_invoice', description: 'Create a DRAFT invoice (never sent or marked paid). Use only when Soulvee asks for an invoice.', inputSchema: { type: 'object', required: ['client', 'brand', 'items'], properties: { client: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, vat: { type: 'boolean' }, items: { type: 'array', items: { type: 'object', properties: { desc: { type: 'string' }, amount: { type: 'number' } } } } } },
       execute: async a => { const st = ref.current.latestSettings(); const number = invNumber(a.client, st.invoiceSeq); await ref.current.add('invoices', { number, client: a.client, clientEmail: '', brand: a.brand, items: (a.items || []).map(i => ({ desc: i.desc || '', amount: num(i.amount) })), vat: a.vat !== false, wht: 0, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft', offerId: '', dealId: '' }); await ref.current.saveSettings({ ...st, invoiceSeq: num(st.invoiceSeq) + 1 }); setActs(x => [...x, `Drafted invoice ${number}`]); return { ok: true, number }; } },
+    { name: 'list_content', description: 'Social posts in the content plan: title, brand, platforms, status (idea, draft, approved, scheduled, posted, failed) and scheduled time.', inputSchema: { type: 'object', properties: { status: { type: 'string', enum: POST_STATUS } } },
+      execute: ({ status } = {}) => ref.current.data.content.filter(p => !status || p.status === status).slice(0, 40).map(p => ({ title: p.title, brand: brandOf(p.brand).name, platforms: p.platforms, status: p.status, scheduledAt: p.scheduledAt || null, caption: String(p.text || '').slice(0, 280) })) },
+    { name: 'create_content_drafts', description: 'Add social post drafts to the content plan for Soulvee to review and approve. Drafts are never published automatically. Use only when Soulvee asks for posts, captions or a content plan.', inputSchema: { type: 'object', required: ['posts'], properties: { posts: { type: 'array', items: { type: 'object', required: ['brand', 'caption', 'platforms'], properties: { brand: { type: 'string', enum: BRANDS.map(b => b.id) }, title: { type: 'string' }, caption: { type: 'string' }, hashtags: { type: 'array', items: { type: 'string' } }, platforms: { type: 'array', items: { type: 'string', enum: PLATFORMS.map(p => p.id) } }, day: { type: 'integer', description: 'Days from today, 0-13' }, time: { type: 'string', description: 'Local posting time as HH:MM' }, visual: { type: 'string' }, script: { type: 'string' } } } } } },
+      execute: async a => { const posts = (a.posts || []).slice(0, 14); for (const p of posts) await ref.current.add('content', { brand: p.brand, title: p.title || 'Post idea', text: [String(p.caption || '').trim(), tagLine(p.hashtags)].filter(Boolean).join('\n\n'), platforms: p.platforms && p.platforms.length ? p.platforms : ['instagram'], media: [], status: 'draft', scheduledAt: p.day !== undefined || p.time ? slotFor(p.day || 0, p.time) : '', visual: p.visual || '', script: p.script || '', igType: '', ytCategory: YT_CATEGORY[p.brand] || '22', firstComment: '', notes: 'Added by assistant', aiAssisted: true }); setActs(x => [...x, `Added ${posts.length} post draft${posts.length === 1 ? '' : 's'} to Content`]); return { ok: true, added: posts.length }; } },
   ];
 
   const preamble = () => `${voiceFor(voice)}
 You are also Soulvee's operations sub-agent inside Soulvee OS, the Soulveetainment Media Consults control unit, which runs four brands (DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emporium, EFR) plus digital products. Philosophy: systems over hustle.
 Today is ${fmtDate(localDate())}, Lagos. Money is NGN-first; format like ₦1,500,000. Lead with decisions and numbers, keep it skimmable.
-Use the tools to read real figures before answering money or pipeline questions — never invent numbers. Only create deals, offers or draft invoices when explicitly asked. When asked to reply to a client or fan message, write the reply in the brand voice above, ready to paste, and don't invent prices or dates that aren't in the catalogue or the message.
+Use the tools to read real figures before answering money or pipeline questions — never invent numbers. Only create deals, offers, draft invoices or post drafts when explicitly asked. Post drafts go to the Content tab for Soulvee to approve; you can't publish anything yourself. When asked to reply to a client or fan message, write the reply in the brand voice above, ready to paste, and don't invent prices or dates that aren't in the catalogue or the message.
 Plain text with short lines; simple dashes for lists; no markdown headers or tables.`;
 
   const send = async text => {
@@ -1027,8 +1553,7 @@ Plain text with short lines; simple dashes for lists; no markdown headers or tab
     setMsgs([...history, { role: 'assistant', content: '' }]); setInput(''); setBusy(true); setActs([]);
     const ctl = new AbortController(); abortRef.current = ctl;
     try {
-      const payload = history.map((m, i) => i === 0 ? { role: 'user', content: preamble() + '\n\n---\n' + m.content } : m);
-      const r = await caps.sample(payload, { tools, cache: false, signal: ctl.signal, onText: ({ text }) => setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: text }; return c; }) });
+      const r = await caps.sample(history, { system: preamble(), tools, effort: 'medium', signal: ctl.signal, onText: ({ text }) => setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: text }; return c; }) });
       setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: (r.text || '').trim() || '(no answer)' }; return c; });
     } catch (e) {
       const t = e && e.text ? e.text : sampleMessage(e);
@@ -1040,7 +1565,7 @@ Plain text with short lines; simple dashes for lists; no markdown headers or tab
 
   if (caps.sample === null) return html`<${Section} title="AI sub-agent"><${Card}><${Empty} title="AI isn't available">${aiOffText()}<//><//><//>`;
 
-  const prompts = ['Where is my revenue this H2 — what should I chase first?', 'Which deals need a follow-up this week?', 'Draft a reply to a fan asking how to book DJ Soulvee for a December wedding', 'Turn my Google Workspace automation skill into an offer and save it'];
+  const prompts = ['Where is my revenue this H2 — what should I chase first?', 'Which deals need a follow-up this week?', 'Draft a reply to a fan asking how to book DJ Soulvee for a December wedding', 'Turn my Google Workspace automation skill into an offer and save it', 'Draft three Instagram posts for DJ Soulvee about this weekend'];
   return html`<div className="space-y-4">
     <${Section} title="AI sub-agent" sub="Reads your live numbers, drafts replies in your voice, and logs deals, offers and draft invoices when you ask." action=${html`<div className="w-44"><${Select} value=${voice} onChange=${setVoice} options=${[{ v: 'dj', l: 'Voice: DJ Soulvee' }, { v: 'smc', l: 'Voice: SMC' }, { v: 'emporium', l: 'Voice: Emporium' }]} /></div>`} />
     <${Card} className="!p-0 overflow-hidden">
@@ -1096,7 +1621,7 @@ function LearnView({ store, caps, toast }) {
 Teach Level ${lvl} of 5 in: ${t.title}.
 ${t.goal ? 'His goal: ' + t.goal + '.' : ''} ${o ? `This skill powers the offer "${o.name}"${(o.tiers || []).some(x => num(x.price) > 0) ? ' priced from ' + ngn(Math.min(...o.tiers.filter(x => num(x.price) > 0).map(x => num(x.price)))) : ''}.` : ''} ${t.notes ? 'Notes so far: ' + t.notes : ''}
 Levels: 1 foundations, 2 core workflow, 3 real project, 4 client-ready delivery, 5 productise and scale. Pitch it exactly at Level ${lvl}.
-Format as plain text with these labels on their own lines: GOAL, KEY IDEAS (3-5 dashes), DO THIS NOW (one 30-60 minute hands-on task with steps), TURN IT INTO MONEY (how this level makes the offer more sellable, NGN angle), CHECK YOURSELF (3 short questions). Under 350 words. No markdown symbols.`, { cache: false, onText: ({ text }) => setLesson(l => l && { ...l, text }) });
+Format as plain text with these labels on their own lines: GOAL, KEY IDEAS (3-5 dashes), DO THIS NOW (one 30-60 minute hands-on task with steps), TURN IT INTO MONEY (how this level makes the offer more sellable, NGN angle), CHECK YOURSELF (3 short questions). Under 350 words. No markdown symbols.`, { effort: 'low', onText: ({ text }) => setLesson(l => l && { ...l, text }) });
       setLesson(l => l && { ...l, text: (r.text || '').trim(), busy: false });
     } catch (e) { setLesson(l => l && { ...l, text: sampleMessage(e), busy: false }); }
   };
@@ -1129,11 +1654,11 @@ Format as plain text with these labels on their own lines: GOAL, KEY IDEAS (3-5 
 function SetupView({ store, caps, toast }) {
   const { settings, saveSettings, mode, readOnly } = store;
   const [f, setF] = useState(() => JSON.parse(JSON.stringify(settings)));
-  const savedKey = JSON.stringify({ ...settings, theme: '' });
+  const savedKey = JSON.stringify({ ...settings, theme: '', social: '' });
   useEffect(() => { setF(JSON.parse(JSON.stringify(settings))); }, [savedKey]);
   const setC = (k, v) => setF(p => ({ ...p, company: { ...p.company, [k]: v } }));
   const allocTotal = f.alloc.reduce((a, b) => a + num(b.pct), 0);
-  const save = async () => { await saveSettings({ ...f, theme: settings.theme, h2Target: num(f.h2Target), vatRate: num(f.vatRate), whtDefault: num(f.whtDefault), invoiceSeq: Math.max(1, num(f.invoiceSeq)), fx: { USD: num(f.fx.USD), GBP: num(f.fx.GBP), EUR: num(f.fx.EUR) }, alloc: f.alloc.map(a => ({ name: a.name, pct: num(a.pct) })) }); toast('Setup saved'); };
+  const save = async () => { await saveSettings({ ...f, theme: settings.theme, social: store.latestSettings().social, h2Target: num(f.h2Target), vatRate: num(f.vatRate), whtDefault: num(f.whtDefault), invoiceSeq: Math.max(1, num(f.invoiceSeq)), fx: { USD: num(f.fx.USD), GBP: num(f.fx.GBP), EUR: num(f.fx.EUR) }, alloc: f.alloc.map(a => ({ name: a.name, pct: num(a.pct) })) }); toast('Setup saved'); };
   const setTheme = t => saveSettings({ ...settings, theme: t });
 
   return html`<div className="space-y-5">
@@ -1169,6 +1694,8 @@ function SetupView({ store, caps, toast }) {
       <div className="space-y-2">${f.alloc.map((a, i) => html`<div key=${i} className="flex gap-2"><input className=${inputCls} value=${a.name} onChange=${e => setF({ ...f, alloc: f.alloc.map((x, j) => j === i ? { ...x, name: e.target.value } : x) })} /><input className=${inputCls + ' !w-20'} inputMode="numeric" value=${a.pct} onChange=${e => setF({ ...f, alloc: f.alloc.map((x, j) => j === i ? { ...x, pct: e.target.value } : x) })} /><button className="text-rose-500 text-xs px-1" onClick=${() => setF({ ...f, alloc: f.alloc.filter((_, j) => j !== i) })}>✕</button></div>`)}</div>
       <button className="text-xs text-violet-500 font-medium mt-2" onClick=${() => setF({ ...f, alloc: [...f.alloc, { name: 'New bucket', pct: 0 }] })}>+ Add bucket</button>
     <//>
+    <${AiCheck} caps=${caps} />
+    <${SocialSetup} store=${store} toast=${toast} />
     <${Card}>
       <p className="font-semibold text-sm mb-1">Backup & restore</p>
       <p className=${'text-xs mb-3 ' + muted}>Your data lives in this browser. Export a backup file to keep it safe or move it to another device.</p>
@@ -1189,6 +1716,7 @@ const TABS = [
   { id: 'command', label: 'Command', icon: '◎' },
   { id: 'skills', label: 'Skills → Revenue', icon: '✦' },
   { id: 'pipeline', label: 'Pipeline', icon: '▤' },
+  { id: 'content', label: 'Content', icon: '✎' },
   { id: 'money', label: 'Money', icon: '₦' },
   { id: 'workspace', label: 'Google', icon: '✉' },
   { id: 'assistant', label: 'AI Agent', icon: '✧' },
@@ -1205,6 +1733,7 @@ function App() {
   const [caps, setCaps] = useState({ sample: undefined, mcp: undefined });
   const [dealEdit, setDealEdit] = useState(null);
   const [invEdit, setInvEdit] = useState(null);
+  const [contentPrefill, setContentPrefill] = useState(null);
 
   useEffect(() => { document.documentElement.classList.toggle('dark', store.settings.theme !== 'light'); }, [store.settings.theme]);
   useEffect(() => {
@@ -1215,18 +1744,22 @@ function App() {
   // Gmail and Calendar need claude.ai connectors; without them the Google tab would be a dead end.
   const tabs = TABS.filter(t => t.id !== 'workspace' || caps.mcp !== null);
   useEffect(() => { if (!tabs.some(t => t.id === tab)) setTab('command'); }, [caps.mcp, tab]);
+  // On a phone the menu scrolls sideways: keep the open tab in view.
+  useEffect(() => { const el = document.querySelector('nav [data-active="true"]'); if (el && el.scrollIntoView) el.scrollIntoView({ inline: 'center', block: 'nearest' }); }, [tab]);
 
   const go = id => { setTab(id); try { history.replaceState(null, '', '#' + id); } catch (e) { location.hash = id; } window.scrollTo({ top: 0 }); };
   const openDeal = d => setDealEdit(d || {});
   const openInvoice = (inv, deal) => setInvEdit({ inv: inv || null, deal: deal || null });
   const startDeal = o => { const t = (o.tiers || []).find(t => num(t.price) > 0); setDealEdit({ brand: o.brand, offerId: o.id, value: t ? t.price : '', stage: 'lead', nextStep: o.firstMove || '' }); };
+  const promote = o => { setContentPrefill({ brand: o.brand, offerId: o.id, goal: `Promote ${o.name}` }); go('content'); };
   const saveDeal = async v => { if (dealEdit && dealEdit.id) await store.update('deals', dealEdit.id, v); else await store.add('deals', v); setDealEdit(null); toast('Deal saved'); };
 
   const dark = store.settings.theme !== 'light';
   const view = {
     command: html`<${CommandView} store=${store} caps=${caps} go=${go} openDeal=${openDeal} openInvoice=${openInvoice} />`,
-    skills: html`<${SkillsView} store=${store} caps=${caps} toast=${toast} startDeal=${startDeal} />`,
+    skills: html`<${SkillsView} store=${store} caps=${caps} toast=${toast} startDeal=${startDeal} promote=${promote} />`,
     pipeline: html`<${PipelineView} store=${store} caps=${caps} toast=${toast} openDeal=${openDeal} openInvoice=${openInvoice} />`,
+    content: html`<${ContentView} store=${store} caps=${caps} toast=${toast} prefill=${contentPrefill} clearPrefill=${() => setContentPrefill(null)} />`,
     money: html`<${MoneyView} store=${store} toast=${toast} openInvoice=${openInvoice} />`,
     workspace: html`<${WorkspaceView} caps=${caps} toast=${toast} openDeal=${openDeal} />`,
     assistant: html`<${AssistantView} store=${store} caps=${caps} toast=${toast} />`,
@@ -1249,7 +1782,7 @@ function App() {
             <button onClick=${() => store.saveSettings({ ...store.settings, theme: dark ? 'light' : 'dark' })} className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/10 text-lg" aria-label="Toggle day and night mode">${dark ? '☀️' : '🌙'}</button>
           </div>
         </div>
-        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${tabs.map(t => html`<button key=${t.id} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}</button>`)}</nav>
+        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${tabs.map(t => html`<button key=${t.id} data-active=${tab === t.id ? 'true' : 'false'} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}</button>`)}</nav>
       </div>
     </header>
     <main className="max-w-6xl mx-auto px-4 py-5 pb-24">

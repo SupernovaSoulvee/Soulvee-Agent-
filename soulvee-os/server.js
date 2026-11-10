@@ -1,19 +1,24 @@
 #!/usr/bin/env node
-// Soulvee OS server: serves the app and proxies AI requests to Claude so the
-// API key stays on the server. No dependencies; needs Node 18+.
+// Soulvee OS server: serves the app, streams Claude for the AI features (the API key stays
+// on the server) and publishes social posts through Buffer or a Make/Zapier/n8n webhook.
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
 loadEnv(path.join(__dirname, '.env'));
 
+const claude = require('./lib/claude');
+const social = require('./lib/social');
+
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '0.0.0.0';
-const API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const MODEL = process.env.SOULVEE_MODEL || 'claude-sonnet-5-5';
-const ACCESS_TOKEN = process.env.SOULVEE_ACCESS_TOKEN || ''; // optional: protects /api/claude when hosted publicly
+const ACCESS_TOKEN = process.env.SOULVEE_ACCESS_TOKEN || ''; // protects AI and publishing when hosted publicly
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const DATA_DIR = path.resolve(process.env.SOULVEE_DATA_DIR || path.join(__dirname, 'data'));
 const MAX_BODY = 2 * 1024 * 1024;
+
+const ai = claude.create(process.env);
+const posts = social.create(process.env, DATA_DIR);
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -29,17 +34,25 @@ function loadEnv(file) {
 }
 
 function send(res, status, body, headers = {}) {
-  res.writeHead(status, { 'content-type': 'application/json', ...headers });
+  res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
 }
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
+    let size = 0;
+    const chunks = [];
     req.on('data', c => { size += c.length; if (size > MAX_BODY) { reject(new Error('Request too large')); req.destroy(); } else chunks.push(c); });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
+}
+
+async function readJson(req) {
+  const text = await readBody(req).catch(() => null);
+  if (text === null) return null;
+  try { return JSON.parse(text); }
+  catch { return null; }
 }
 
 function authorised(req) {
@@ -48,38 +61,61 @@ function authorised(req) {
   return req.headers['x-soulvee-token'] === ACCESS_TOKEN || cookie.split(/;\s*/).includes('soulvee_token=' + encodeURIComponent(ACCESS_TOKEN));
 }
 
+function loopback(req) {
+  const ip = req.socket.remoteAddress || '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+// Publishing reaches your real social accounts, so without SOULVEE_ACCESS_TOKEN it is only
+// allowed from this computer. Hosted publicly, set the token.
+function canPublish(req) {
+  return ACCESS_TOKEN ? authorised(req) : loopback(req);
+}
+
+// Why AI is unavailable for this request, or '' when it can be used.
+function aiBlock(req, url) {
+  if (!ai.client) return 'no_key';
+  if (!authorised(req) && url.searchParams.get('token') !== ACCESS_TOKEN) return 'locked';
+  return '';
+}
+
 async function handleClaude(req, res) {
-  if (!API_KEY) return send(res, 503, { error: { message: 'AI is off: set ANTHROPIC_API_KEY on the server.' } });
-  if (!authorised(req)) return send(res, 401, { error: { message: 'AI is locked: open the app once with ?token=YOUR_TOKEN.' } });
-  let body;
-  try { body = JSON.parse(await readBody(req)); } catch (e) { return send(res, 400, { error: { message: 'Bad request body' } }); }
-  if (!Array.isArray(body.messages) || !body.messages.length) return send(res, 400, { error: { message: 'messages required' } });
+  if (!ai.client) return send(res, 503, { error: { code: 'no_key', message: 'AI is off: set ANTHROPIC_API_KEY on the server.' } });
+  if (!authorised(req)) return send(res, 401, { error: { code: 'locked', message: 'AI is locked: open the app once with ?token=YOUR_TOKEN.' } });
+  const body = await readJson(req);
+  const problem = claude.check(body);
+  if (problem) return send(res, 400, { error: { code: 'bad_request', message: problem } });
+  return claude.stream(ai, res, body);
+}
 
-  const payload = {
-    model: MODEL,
-    max_tokens: Math.min(Number(body.max_tokens) || 2048, 8192),
-    messages: body.messages,
-  };
-  if (Array.isArray(body.tools) && body.tools.length) payload.tools = body.tools;
-  if (typeof body.system === 'string') payload.system = body.system;
+async function handleAiTest(req, res) {
+  if (!ai.client) return send(res, 200, { ok: false, code: 'no_key', message: 'AI is off: set ANTHROPIC_API_KEY on the server, then restart it.' });
+  if (!authorised(req)) return send(res, 401, { ok: false, code: 'locked', message: 'AI is locked: open the app once with ?token=YOUR_TOKEN.' });
+  const out = await claude.test(ai).catch(err => ({ ok: false, ...claude.explain(err, ai.model) }));
+  return send(res, 200, out);
+}
 
-  try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify(payload),
-    });
-    const text = await r.text();
-    res.writeHead(r.status, { 'content-type': 'application/json' });
-    res.end(text);
-  } catch (e) {
-    send(res, 502, { error: { message: 'Could not reach Claude: ' + e.message } });
+async function handleSocial(req, res, url) {
+  const route = url.pathname.slice('/api/social/'.length);
+  if (route === 'status' && req.method === 'GET') return send(res, 200, { ...posts.status(), allowed: canPublish(req) });
+  if (!canPublish(req)) return send(res, 403, { error: { code: 'locked', message: ACCESS_TOKEN ? 'Publishing is locked: open the app once with ?token=YOUR_TOKEN.' : 'Publishing only works from the computer running Soulvee OS until SOULVEE_ACCESS_TOKEN is set.' } });
+  const reply = promise => promise.then(data => send(res, 200, data), err => send(res, err.code ? 400 : 500, { error: { code: err.code || 'server', message: err.message } }));
+  if (route === 'channels' && req.method === 'GET') return reply(posts.channels(url.searchParams.get('refresh') === '1').then(channels => ({ channels })));
+  if (route === 'publish' && req.method === 'POST') {
+    const body = await readJson(req);
+    const target = body && body.target === 'webhook' ? 'webhook' : 'buffer';
+    return reply(Promise.resolve().then(() => posts.publish(social.clean(body && body.post, target), target)));
   }
+  if (route === 'jobs' && req.method === 'GET') return send(res, 200, { jobs: posts.jobs(String(url.searchParams.get('ids') || '').split(',').filter(Boolean)) });
+  const cancel = route.match(/^jobs\/([\w-]+)\/cancel$/);
+  if (cancel && req.method === 'POST') return reply(Promise.resolve().then(() => ({ job: posts.cancel(cancel[1]) })));
+  if (route === 'test-webhook' && req.method === 'POST') return reply(posts.testHook());
+  return send(res, 404, { error: { code: 'not_found', message: 'Not found' } });
 }
 
 function serveStatic(req, res, pathname) {
   let rel;
-  try { rel = decodeURIComponent(pathname); } catch (e) { return send(res, 400, { error: 'Bad path' }); }
+  try { rel = decodeURIComponent(pathname); } catch { return send(res, 400, { error: 'Bad path' }); }
   if (rel === '/' || rel === '') rel = '/index.html';
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
   if (!file.startsWith(PUBLIC_DIR + path.sep)) return send(res, 403, { error: 'Forbidden' });
@@ -101,13 +137,6 @@ function serveStatic(req, res, pathname) {
   });
 }
 
-// Why AI is unavailable for this request, or '' when it can be used.
-function aiBlock(req, url) {
-  if (!API_KEY) return 'no_key';
-  if (!authorised(req) && url.searchParams.get('token') !== ACCESS_TOKEN) return 'locked';
-  return '';
-}
-
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   res.setHeader('x-content-type-options', 'nosniff');
@@ -119,18 +148,26 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === '/api/health') {
       const reason = aiBlock(req, url);
-      return send(res, 200, { ok: true, ai: !reason, reason: reason || undefined, model: MODEL }, { 'cache-control': 'no-store' });
+      return send(res, 200, { ok: true, ai: !reason, reason: reason || undefined, model: ai.model, social: posts.status() });
     }
     if (url.pathname === '/api/claude' && req.method === 'POST') return await handleClaude(req, res);
+    if (url.pathname === '/api/ai-test' && req.method === 'POST') return await handleAiTest(req, res);
+    if (url.pathname.startsWith('/api/social/')) return await handleSocial(req, res, url);
     if (url.pathname.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Method not allowed' });
     serveStatic(req, res, url.pathname);
   } catch (e) {
-    send(res, 500, { error: { message: e.message } });
+    console.error(e);
+    if (!res.headersSent) send(res, 500, { error: { message: e.message } });
+    if (res.headersSent && !res.writableEnded) res.end();
   }
 });
 
+posts.start();
 server.listen(PORT, HOST, () => {
+  const s = posts.status();
   console.log(`Soulvee OS running on http://localhost:${PORT}`);
-  console.log(API_KEY ? `AI on (model ${MODEL})${ACCESS_TOKEN ? ', token-protected' : ''}` : 'AI off: set ANTHROPIC_API_KEY to enable the agent, offer builder and lessons');
+  console.log(ai.client ? `AI on (model ${ai.model})${ACCESS_TOKEN ? ', token-protected' : ''}` : 'AI off: set ANTHROPIC_API_KEY to enable the agent, content generator, offer builder and lessons');
+  console.log(`Publishing: ${[s.buffer && 'Buffer', s.webhook && `webhook${s.signed ? ' (signed)' : ''}`].filter(Boolean).join(' + ') || 'off (copy and post by hand)'}`);
+  if ((s.buffer || s.webhook) && !ACCESS_TOKEN) console.log('Publishing is limited to this computer. Set SOULVEE_ACCESS_TOKEN before hosting Soulvee OS publicly.');
 });
