@@ -1,8 +1,9 @@
 // Soulvee OS service worker: lets the app open without a connection.
 // Network first, so updates arrive as soon as you're online; the cache is the fallback.
-const CACHE = 'soulvee-os-v2';
+const CACHE = 'soulvee-os-v3';
 const SHELL = [
   '/',
+  '/shared.js',
   '/os-runtime.js',
   '/vendor/app.css',
   '/vendor/react.production.min.js',

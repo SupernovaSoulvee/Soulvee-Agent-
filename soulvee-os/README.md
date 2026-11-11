@@ -7,7 +7,7 @@ The command centre for DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emp
 - **Command**: revenue, costs, outstanding invoices, weighted pipeline and progress towards the H2 target, all in NGN.
 - **Skills → Revenue**: an offer catalogue, with an AI converter that turns a skill into a priced offer. **Promote** on any offer sends it to Content.
 - **Pipeline**: deals by stage and next steps. Follow-up emails are written by AI in each brand's voice and open in your email app. Calls are booked with a pre-filled Google Calendar link or a calendar file.
-- **Content**: the Content Studio. AI writes posts in each brand's voice, with captions, hashtags, visual briefs, video scripts and posting times. You edit and approve them, then publish through Buffer or a Make, Zapier or n8n webhook, or copy and post by hand. See [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
+- **Content**: the Content Studio. AI writes posts in each brand's voice, with captions, hashtags, visual briefs, video scripts and posting times. It can also make an image from each brief. **Autopilot** drafts the coming week's posts on a weekly schedule, and **What's working** reads your Buffer results so the AI does more of what performs. You edit and approve everything, then publish through Buffer or a Make, Zapier or n8n webhook, or copy and post by hand. See [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
 - **Money**: invoices (VAT and WHT, `INV-SMC-…` numbering, printable PDF), an income and expense ledger, FX and allocation buckets. A payment marked by mistake can be undone.
 - **AI Agent**: chat that reads your real numbers and, when you ask, logs deals and offers, drafts invoices and adds post drafts to Content. Answers stream in as they're written.
 - **Learn**: skill tracks with AI lessons from level 1 to 5, linked to offers.
@@ -37,8 +37,13 @@ On a phone, open the URL and choose **Add to Home Screen** (or **Install app**) 
 | `BUFFER_API_KEY` | Publishes and schedules posts through Buffer (Buffer → Settings → API). |
 | `SOCIAL_WEBHOOK_URL` | Sends posts to a Make, Zapier or n8n webhook at the scheduled time. |
 | `SOCIAL_WEBHOOK_SECRET` | Optional. Signs every webhook call so the scenario can check it came from you. |
+| `OPENAI_API_KEY` | Makes an image from each post's visual brief. |
+| `SOULVEE_IMAGE_MODEL` | The image model. Default `gpt-image-2`. |
+| `SOULVEE_IMAGE_QUALITY` | `low`, `medium` (default) or `high`. Higher costs more per image. |
+| `CLOUDINARY_URL` | Hosts the images at permanent public links, which Buffer needs. Copy it from your Cloudinary dashboard (`cloudinary://key:secret@cloud`). |
+| `PUBLIC_URL` | Your server's public address. Without Cloudinary, images are served from `PUBLIC_URL/media/…` instead. |
 | `SOULVEE_ACCESS_TOKEN` | **Required before hosting publicly.** Locks AI and publishing; open the app once with `?token=YOUR_TOKEN`. |
-| `SOULVEE_DATA_DIR` | Where the webhook posting queue is kept. Default `./data`. |
+| `SOULVEE_DATA_DIR` | Where the server keeps the webhook queue, autopilot settings and drafts, and any images it hosts. Default `./data`. |
 | `PORT` | Default `8787`. |
 
 Restart the server after changing `.env`. **Setup → AI connection → Test AI** confirms the key and model work.
@@ -66,16 +71,24 @@ Publishing reaches your real accounts, so without `SOULVEE_ACCESS_TOKEN` it only
 
 The full guide, with the setup steps, platform rules and costs, is [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
 
+## Autopilot, images and results
+
+- **Autopilot** (Content → ⟳ Autopilot): choose a day and time, for example Sunday 17:00 Lagos time, plus a plan for each brand (posts per week, platforms, goal, an offer to push, images on or off). Each week the server drafts the coming week's posts, learning from your Buffer results. Drafts appear in Content the next time you open the app, with a badge on the tab, and are never published until you approve them. **Run now** drafts straight away, and counts as the scheduled run if that is less than 48 hours away. With a webhook set, Soulvee OS also sends an `autopilot.ready` event, so a Make or Zapier scenario can text or email you.
+- **Images**: **Make image** on a post, **Make image from brief** in the editor, or "Make an image for each post" in the generator and autopilot. Images use the brand's look and are hosted on Cloudinary so Buffer can post them. They avoid identifiable faces and only add text the brief asks for.
+- **What's working**: reads up to 60 days of results from Buffer: engagement by platform, best posting hour and top posts. The generator, the autopilot and the AI agent's `get_social_results` tool use it to choose formats, topics and times. Posts you published through Buffer show their own numbers.
+
+Autopilot runs on the server, so the server must be on at the scheduled time. If it was off, autopilot catches up when the server starts again.
+
 ## Data
 
 Your business data is saved in the browser on the device you use (localStorage), so it stays private and works without a connection. Each device has its own copy. Use **Setup → Backup & restore** to export a JSON backup or move your data to another device. Back up regularly, because clearing the browser's site data deletes it.
 
-The server keeps only the webhook posting queue, in `data/`.
+The server keeps only what has to run while you're away, in `data/`: the webhook posting queue, autopilot settings and its waiting drafts, a copy of your offers and recent post titles for the autopilot, and any images it hosts.
 
 ## Hosting
 
 - **Docker**: `docker build -t soulvee-os . && docker run -p 8787:8787 -v soulvee-data:/app/data --env-file .env soulvee-os`. Your `.env` is never copied into the image.
-- **Render / Railway / Fly.io**: deploy this folder as a Node service with build command `npm install` and start command `node server.js`, then set the variables above. If you use the webhook, give the service a persistent disk for `data/` and keep it running at posting times. Buffer needs neither.
+- **Render / Railway / Fly.io**: deploy this folder as a Node service with build command `npm install` and start command `node server.js`, then set the variables above. If you use the webhook or the autopilot, give the service a persistent disk for `data/` and keep it running. Otherwise a redeploy wipes the queue and autopilot settings. Buffer on its own needs neither.
 
 Always set `SOULVEE_ACCESS_TOKEN` on a public host, so nobody else can spend your Claude credit or post to your accounts.
 
@@ -97,9 +110,12 @@ The Gmail lead radar and saving drafts straight into Gmail need claude.ai connec
 - `public/index.html`: the whole interface (React + htm, no build step).
 - `public/os-runtime.js`: browser storage, the streamed AI client and agent loop, and the publishing API client.
 - `server.js`: static files, access control and routing.
-- `lib/claude.js`: Claude through the Anthropic SDK, streamed to the browser as server-sent events.
+- `public/shared.js`: brand voices, platforms, the post schema and prompt builders, shared by the browser and the server so both write posts the same way.
+- `lib/claude.js`: Claude through the Anthropic SDK, streamed to the browser as server-sent events (plus structured generation for the autopilot).
 - `lib/social.js`: Buffer publishing, plus the webhook queue and scheduler.
-- `lib/store.js`: the JSON file store for that queue.
+- `lib/autopilot.js`: the weekly autopilot (schedule, run, draft inbox).
+- `lib/images.js`: images from briefs (OpenAI), hosted on Cloudinary or this server.
+- `lib/store.js`: the JSON file store for the queue and the autopilot.
 - `public/sw.js`: makes the app open offline. If you add a file the app needs to start, list it there and bump `CACHE`.
 
 Styles are precompiled Tailwind in `public/vendor/app.css`. If you add new Tailwind classes, run `npm run build:css`.

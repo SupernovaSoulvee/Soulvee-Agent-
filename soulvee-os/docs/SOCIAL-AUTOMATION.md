@@ -7,7 +7,8 @@ How Soulvee OS creates and publishes posts for DJ Soulvee, Soulveetainment Media
 - **Content creation already runs inside the app.** In **Content**, the AI writes posts in each brand's voice. Each post gets a caption with a hook and a call to action, hashtags, a visual brief, a video script for reels and shorts, and a suggested posting time over the next two weeks. The AI agent can do the same from chat ("draft three posts about Friday's gig"), and **Promote** on any offer turns it into posts.
 - **For posting, connect Buffer.** One Buffer API key lets Soulvee OS schedule to Instagram, TikTok, Facebook, LinkedIn, X, Threads, YouTube and Pinterest. Buffer does the scheduling, so your computer doesn't have to stay on. You also skip the hard parts of going direct to each platform: TikTok's audit, Meta's app review and X's per-post fees.
 - **Make, Zapier or n8n is the alternative** if you'd rather build your own flows. Soulvee OS calls your webhook at the scheduled time with the post, signed so you can trust it.
-- **You stay in control.** Nothing publishes until you approve it and press Publish. The AI can only create drafts.
+- **It runs weekly on its own.** **Autopilot** drafts the coming week's posts for each brand on a schedule you choose, can **make an image** from each post's brief, and learns from your **Buffer results** (what's working) every time it writes.
+- **You stay in control.** Nothing publishes until you approve it and press Publish. The AI and the autopilot can only create drafts.
 
 ## How it works in the app
 
@@ -73,7 +74,7 @@ What Soulvee OS sends (`POST`, JSON):
 }
 ```
 
-The headers are `x-soulvee-event`, `x-soulvee-delivery` (the job id), `x-soulvee-timestamp` and, with a secret, `x-soulvee-signature`. The signature is `sha256=` followed by the HMAC-SHA256 of `timestamp + "." + body`. A test post has `"event": "test"` and `"test": true`. To check the signature, for example in n8n or your own code:
+The headers are `x-soulvee-event`, `x-soulvee-delivery` (the job id), `x-soulvee-timestamp` and, with a secret, `x-soulvee-signature`. The signature is `sha256=` followed by the HMAC-SHA256 of `timestamp + "." + body`. A test post has `"event": "test"` and `"test": true`. When the autopilot has drafted posts, Soulvee OS sends `"event": "autopilot.ready"` with a summary (`drafts`, `brands`, `titles` and, if `PUBLIC_URL` is set, `appUrl`), so a scenario can text or email you. **Filter your posting route on `event` = `post.publish`**, so these notices are never posted. To check the signature, for example in n8n or your own code:
 
 ```js
 const crypto = require('crypto');
@@ -102,27 +103,61 @@ It's possible, but each platform adds work or cost, and Buffer has already done 
 
 Other all-in-one posting APIs exist. [Ayrshare](https://www.ayrshare.com/pricing) is one, but third-party price checks put it at about $149 a month and up, far more than Buffer for one creator's channels.
 
-## Making the images and videos
+## Images from each brief
 
-The AI writes a **visual brief** for every post, plus a **video script** for reels and shorts. To turn them into media:
+Every post the AI writes comes with a **visual brief**, and reels and shorts also get a **video script**. Soulvee OS can turn the brief into an image automatically:
 
-1. Paste the brief into Canva, Higgsfield or CapCut. Canva and Higgsfield are both connected to your Claude account, so you can also ask Claude to make the image from the brief.
-2. Export it and upload it somewhere public and permanent. Cloudinary's free tier works well.
-3. Paste the link into the post under **Media**.
+1. Get an OpenAI API key and a free [Cloudinary](https://cloudinary.com) account.
+2. Add both to `.env` and restart:
+   ```
+   OPENAI_API_KEY=your-openai-key
+   CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
+   ```
+   `CLOUDINARY_URL` is shown on your Cloudinary dashboard. Without it, set `PUBLIC_URL` to your server's public address and images are served from `PUBLIC_URL/media/…`. With neither, images stay on your server: fine for previews and posting by hand, but Buffer can't fetch them.
+3. Use **Make image** on a post card, **✦ Make image from brief** in the editor, or tick **Make an image for each post** in the generator or an autopilot plan.
 
-## Going further: closer to hands-off
+How the images are made:
 
-These are possible next steps, each a clear piece of work:
+- They use the brand's look: violet and magenta nightlife for DJ Soulvee, blue tech for SMC, gold and teal for the Emporium, and so on. Stories, reels, TikTok and Pinterest get tall images; everything else is square. They're saved as JPEG, which Instagram requires.
+- Words appear on the image only when the brief asks for them, in quotes, spelled exactly. To avoid fake likenesses, images show scenes, hands, silhouettes or crowds from behind rather than identifiable faces.
+- The default model is `gpt-image-2`; change it with `SOULVEE_IMAGE_MODEL` and quality with `SOULVEE_IMAGE_QUALITY`. Each image costs a few cents to a few tens of cents, depending on model and quality; check OpenAI's pricing.
+- For video, use the script with CapCut, Higgsfield or your own footage, upload the file somewhere public, and paste the link under **Media**.
 
-- **Weekly autopilot**: a scheduled server job drafts next week's posts every Monday and notifies you to approve them. This needs the content plan stored on the server instead of only in the browser.
-- **Automatic images**: generate an image from each visual brief with an image-generation API, host it, and attach it to the draft.
-- **Learn from results**: read post metrics from Buffer's API, and have the generator do more of what performs.
+## What's working: learning from results
 
-I'd keep the approval step even with autopilot. One wrong price, date or claim on a public account costs more than the minute it takes to approve.
+**What's working** in the Content tab reads up to 60 days of results from Buffer, using your personal API key. It works out an engagement rate for each post: Buffer's own figure where the network reports one, otherwise interactions over reach, with comments, shares and saves weighted above reactions. From those it gives:
+
+- average engagement by platform,
+- the best posting hour so far, on the autopilot's time zone,
+- your top posts, plus your weakest ones once there are enough.
+
+That summary is fed to the generator (**Use what's working**, on by default), to every autopilot run and to the AI agent (`get_social_results`, for questions like "what's working on Instagram?"). Posts published from Soulvee OS through Buffer also get their own numbers on their cards, and turn "posted". Buffer refreshes results about once a day, so new posts take a day to show up.
+
+## Autopilot: a week of drafts, every week
+
+1. In **Content → ⟳ Autopilot**, set the day, time and time zone. The default is Sunday 17:00 Lagos time, so the drafts cover Monday to Sunday.
+2. Add a plan for each brand: posts per week, platforms, a goal, an offer to push, and whether to make images.
+3. Press **Turn on**. The card shows the next run. **Run now** drafts straight away; if the scheduled run is less than 48 hours off, that run is skipped so you don't get the same week twice.
+
+Each run, the server reads your latest Buffer results, writes each plan's posts and makes the images, then leaves the drafts in an inbox. The app brings them into Content the next time it's open, checking every minute, and shows a badge on the Content tab. If a webhook is set, the scenario gets `autopilot.ready`. You review, approve and publish as usual.
+
+Good to know:
+
+- Autopilot runs on the server, so the server has to be on. A run missed while it was off happens when it starts again. A hosted server needs a persistent disk for `data/`.
+- The app sends the autopilot your current offers and recent post titles, so plans can push real prices and avoid repeating themselves. Nothing else leaves the device.
+- Each run costs AI tokens for every post plus one image per post where images are on. A few brands at five posts a week is a small weekly cost; check Anthropic's and OpenAI's pricing.
+- With `SOULVEE_ACCESS_TOKEN` set (needed when hosted), only devices that opened the app with the token can change or run the autopilot.
+
+## Going further
+
+- **Video**: turn each script into a short video automatically with a video-generation API. Possible, but it costs much more per post and is slower.
+- **Publishing on autopilot**: technically easy, but I'd keep the approval step. One wrong price, date or claim on a public account costs more than the minute it takes to approve.
 
 ## Sources
 
-- Buffer API: [Posts & Scheduling](https://developers.buffer.com/guides/posts-and-scheduling.md), [Authentication](https://developers.buffer.com/guides/authentication.md), [API limits](https://developers.buffer.com/guides/api-limits.md), [Hosting media](https://developers.buffer.com/guides/hosting-media.md), [launch post](https://buffer.com/resources/buffer-api-is-here/)
+- Buffer API: [Post Metrics](https://developers.buffer.com/guides/post-metrics.md), [Posts & Scheduling](https://developers.buffer.com/guides/posts-and-scheduling.md), [Authentication](https://developers.buffer.com/guides/authentication.md), [API limits](https://developers.buffer.com/guides/api-limits.md), [Hosting media](https://developers.buffer.com/guides/hosting-media.md), [launch post](https://buffer.com/resources/buffer-api-is-here/)
+- OpenAI: [Image generation guide](https://developers.openai.com/api/docs/guides/tools-image-generation), [Create image reference](https://developers.openai.com/api/reference/resources/images/methods/generate)
+- Cloudinary: [Generating authentication signatures](https://cloudinary.com/documentation/authentication_signatures), [Upload API reference](https://cloudinary.com/documentation/image_upload_api_reference)
 - TikTok: [Content Posting API, Direct Post](https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post)
 - Instagram: [Content Publishing](https://developers.facebook.com/docs/instagram-platform/content-publishing)
 - X API pricing (third-party summaries): [Upload-Post](https://www.upload-post.com/x-api-pricing/), [Postproxy](https://postproxy.dev/blog/x-api-pricing-2026)

@@ -29,6 +29,7 @@ try { var t = localStorage.getItem('cu-theme'); if (t === 'light') document.docu
 </head>
 <body class="bg-slate-50 text-slate-900 dark:bg-[#0b0715] dark:text-slate-100 font-sans min-h-screen">
 <div id="root"></div>
+<script src="/shared.js"></script>
 <script src="/os-runtime.js"></script>
 <script>
 if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
@@ -44,21 +45,19 @@ const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)'
 const aiOffText = () => (window.SoulveeOS && window.SoulveeOS.aiOffReason && window.SoulveeOS.aiOffReason()) || 'AI is off.';
 
 /* ---------------- constants ---------------- */
-const BRANDS = [
-  { id: 'smc', name: 'Soulveetainment Media Consults', short: 'SMC', grad: 'from-sky-500 to-blue-600', dot: 'bg-sky-500' },
-  { id: 'dj', name: 'DJ Soulvee', short: 'DJ Soulvee', grad: 'from-violet-600 to-fuchsia-600', dot: 'bg-fuchsia-500' },
-  { id: 'emporium', name: "Soulvee's Emporium", short: 'Emporium', grad: 'from-amber-500 to-orange-600', dot: 'bg-amber-500' },
-  { id: 'efr', name: 'EFR', short: 'EFR', grad: 'from-emerald-500 to-teal-600', dot: 'bg-emerald-500' },
-  { id: 'digital', name: 'Digital Products', short: 'Digital', grad: 'from-rose-500 to-pink-600', dot: 'bg-rose-500' },
-];
-const brandOf = id => BRANDS.find(b => b.id === id) || BRANDS[0];
-
-const VOICE = {
-  dj: 'You are DJ Soulvee (Supernova Soulvee), an Afro-urban DJ and radio broadcaster on Raypower 100.5FM and Metro 97.7FM. Tone: energetic, premium Afro-fusion, confident, visionary — Lagos-rooted with global crossover appeal.',
-  smc: 'You are Soulveetainment Media Consults, a creative and technical media powerhouse doing B2B hospitality-tech and AI-automation consulting from Lagos. Tone: professional, innovative, reliable — clear and persuasive.',
-  emporium: "You are Soulvee's Emporium, a premium African lifestyle and zodiac-themed merch brand. Tone: stylish, aspirational, lifestyle-driven.",
+const SHARED = window.SoulveeShared;
+const TZ = SHARED.deviceZone();
+const BRAND_UI = {
+  smc: { grad: 'from-sky-500 to-blue-600', dot: 'bg-sky-500' },
+  dj: { grad: 'from-violet-600 to-fuchsia-600', dot: 'bg-fuchsia-500' },
+  emporium: { grad: 'from-amber-500 to-orange-600', dot: 'bg-amber-500' },
+  efr: { grad: 'from-emerald-500 to-teal-600', dot: 'bg-emerald-500' },
+  digital: { grad: 'from-rose-500 to-pink-600', dot: 'bg-rose-500' },
 };
-const voiceFor = b => VOICE[b === 'efr' ? 'dj' : b === 'digital' ? 'smc' : b] || VOICE.smc;
+const BRANDS = SHARED.BRANDS.map(b => ({ ...b, ...BRAND_UI[b.id] }));
+const brandOf = id => BRANDS.find(b => b.id === id) || BRANDS[0];
+const VOICE = SHARED.VOICE;
+const voiceFor = SHARED.voiceFor;
 
 const STAGES = [
   { id: 'lead', name: 'Lead', p: 10 },
@@ -695,58 +694,19 @@ function PipelineView({ store, caps, toast, openDeal, openInvoice }) {
 }
 
 /* ---------------- Content Studio ---------------- */
-const PLATFORMS = [
-  { id: 'instagram', name: 'Instagram', service: 'instagram', limit: 2200, media: 'any', url: 'https://www.instagram.com/' },
-  { id: 'tiktok', name: 'TikTok', service: 'tiktok', limit: 4000, media: 'any', url: 'https://www.tiktok.com/upload' },
-  { id: 'facebook', name: 'Facebook', service: 'facebook', limit: 63206, media: '', url: 'https://www.facebook.com/' },
-  { id: 'linkedin', name: 'LinkedIn', service: 'linkedin', limit: 3000, media: '', url: 'https://www.linkedin.com/feed/' },
-  { id: 'x', name: 'X', service: 'twitter', limit: 280, media: '', url: 'https://x.com/compose/post' },
-  { id: 'threads', name: 'Threads', service: 'threads', limit: 500, media: '', url: 'https://www.threads.net/' },
-  { id: 'youtube', name: 'YouTube Shorts', service: 'youtube', limit: 5000, media: 'video', url: 'https://studio.youtube.com/' },
-  { id: 'pinterest', name: 'Pinterest', service: 'pinterest', limit: 500, media: 'any', url: 'https://www.pinterest.com/pin-builder/' },
-];
-const platformOf = id => PLATFORMS.find(p => p.id === id) || PLATFORMS[0];
+const PLATFORMS = SHARED.PLATFORMS;
+const platformOf = SHARED.platformOf;
 const POST_STATUS = ['idea', 'draft', 'approved', 'scheduled', 'posted', 'failed'];
 const STATUS_TONE = { idea: 'slate', draft: 'blue', approved: 'violet', scheduled: 'amber', posted: 'green', failed: 'red' };
-const YT_CATEGORY = { dj: '10', efr: '10', emporium: '26', smc: '28', digital: '28' };
+const YT_CATEGORY = SHARED.YT_CATEGORY;
 const SERVICE_LABEL = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook', linkedin: 'LinkedIn', twitter: 'X', threads: 'Threads', youtube: 'YouTube', pinterest: 'Pinterest', bluesky: 'Bluesky', mastodon: 'Mastodon', googlebusiness: 'Google Business', substack: 'Substack' };
-const CONTENT_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['posts'],
-  properties: {
-    posts: {
-      type: 'array',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['title', 'caption', 'hashtags', 'platforms', 'format', 'visual', 'script', 'day', 'time'],
-        properties: {
-          title: { type: 'string' },
-          caption: { type: 'string' },
-          hashtags: { type: 'array', items: { type: 'string' } },
-          platforms: { type: 'array', items: { type: 'string', enum: PLATFORMS.map(p => p.id) } },
-          format: { type: 'string', enum: ['image', 'carousel', 'reel', 'story', 'text', 'video'] },
-          visual: { type: 'string' },
-          script: { type: 'string' },
-          day: { type: 'integer' },
-          time: { type: 'string' },
-        },
-      },
-    },
-  },
-};
+const CONTENT_SCHEMA = SHARED.CONTENT_SCHEMA;
 
 const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 const toLocalParts = iso => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? { date: localDate(d), time: hhmm(d) } : { date: '', time: '' }; };
 const fromLocalParts = (date, time) => { if (!date) return ''; const d = new Date(`${date}T${time || '10:00'}:00`); return isNaN(d) ? '' : d.toISOString(); };
-// "day" days from now at "time" (local); pushed a day later if that moment has already gone.
-const slotFor = (day, time) => {
-  const d = new Date();
-  d.setDate(d.getDate() + Math.max(0, Math.min(13, Math.round(num(day)))));
-  const m = String(time || '').match(/^(\d{1,2}):(\d{2})/);
-  d.setHours(m ? Math.min(23, +m[1]) : 10, m ? Math.min(59, +m[2]) : 0, 0, 0);
-  if (d.getTime() < Date.now() + 10 * 60000) d.setDate(d.getDate() + 1);
-  return d.toISOString();
-};
-const tagLine = tags => (tags || []).map(t => String(t).trim().replace(/^#+/, '').replace(/\s+/g, '')).filter(Boolean).map(t => '#' + t).join(' ');
+const slotFor = (day, time) => SHARED.slot(Math.max(0, Math.min(13, Math.round(num(day)))), time, TZ);
+const tagLine = SHARED.tagLine;
 const fmtSlot = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
 
 function postWarnings(p) {
@@ -778,7 +738,7 @@ function PlatformToggles({ value, onChange }) {
   return html`<div className="flex flex-wrap gap-1.5">${PLATFORMS.map(p => html`<button type="button" key=${p.id} onClick=${() => onChange(value.includes(p.id) ? value.filter(x => x !== p.id) : [...value, p.id])} className=${'px-2.5 py-1 rounded-full text-xs font-medium transition ' + (value.includes(p.id) ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300')}>${p.name}</button>`)}</div>`;
 }
 
-function PostModal({ post, caps, toast, onClose, onSave }) {
+function PostModal({ post, caps, toast, images, onClose, onSave }) {
   const [f, setF] = useState(() => {
     const p = { brand: 'smc', title: '', text: '', platforms: ['instagram'], media: [], status: 'draft', scheduledAt: '', igType: '', ytCategory: '', firstComment: '', visual: '', script: '', notes: '', ...(post || {}) };
     const parts = toLocalParts(p.scheduledAt);
@@ -786,6 +746,16 @@ function PostModal({ post, caps, toast, onClose, onSave }) {
   });
   const [ask, setAsk] = useState('');
   const [busy, setBusy] = useState(false);
+  const [drawing, setDrawing] = useState(false);
+  const draw = async () => {
+    setDrawing(true);
+    try {
+      const r = await window.SoulveeOS.images.generate({ brand: f.brand, visual: f.visual, format: f.format || (f.igType === 'story' ? 'story' : f.igType === 'reel' ? 'reel' : 'image'), platforms: f.platforms, title: f.title });
+      setF(p => ({ ...p, media: [...p.media, { type: 'image', url: r.media.url }] }));
+      toast('Image added');
+    } catch (e) { toast(e.message); }
+    setDrawing(false);
+  };
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   const setMedia = (i, k, v) => set('media', f.media.map((m, j) => j === i ? { ...m, [k]: v } : m));
   const len = String(f.text || '').length;
@@ -826,14 +796,15 @@ ${f.text}`, { effort: 'low' });
       ${caps.sample && html`<div className="sm:col-span-2 flex gap-2"><input className=${inputCls} value=${ask} onChange=${e => setAsk(e.target.value)} placeholder="Optional: how to change it (shorter, more hype, add Pidgin…)" /><${Btn} kind="ghost" onClick=${polish} disabled=${busy || !String(f.text).trim()}>${busy ? 'Polishing…' : 'Polish with AI'}</${Btn}></div>`}
       <div className="sm:col-span-2">
         <div className="flex items-center justify-between mb-1"><span className=${'text-xs font-medium ' + muted}>Media (public links)</span><button type="button" className="text-xs text-violet-500 font-medium" onClick=${() => set('media', [...f.media, { type: 'image', url: '' }])}>+ Add media</button></div>
-        <div className="space-y-2">${f.media.map((m, i) => html`<div key=${i} className="flex gap-2"><select className=${inputCls + ' !w-28'} value=${m.type} onChange=${e => setMedia(i, 'type', e.target.value)}><option value="image">Image</option><option value="video">Video</option></select><input className=${inputCls} value=${m.url} onChange=${e => setMedia(i, 'url', e.target.value)} placeholder="https://res.cloudinary.com/…/flyer.jpg" /><button type="button" className="text-rose-500 text-xs px-1" onClick=${() => set('media', f.media.filter((_, j) => j !== i))}>✕</button></div>`)}</div>
+        <div className="space-y-2">${f.media.map((m, i) => html`<div key=${i} className="flex gap-2"><select className=${inputCls + ' !w-28'} value=${m.type} onChange=${e => setMedia(i, 'type', e.target.value)}><option value="image">Image</option><option value="video">Video</option></select>${m.type === 'image' && m.url ? html`<img src=${m.url} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0 bg-slate-100 dark:bg-white/10" />` : null}<input className=${inputCls} value=${m.url} onChange=${e => setMedia(i, 'url', e.target.value)} placeholder="https://res.cloudinary.com/…/flyer.jpg" /><button type="button" className="text-rose-500 text-xs px-1" onClick=${() => set('media', f.media.filter((_, j) => j !== i))}>✕</button></div>`)}</div>
         <p className=${'text-[11px] mt-1 ' + muted}>Use a direct public link (Cloudinary, Cloudflare R2, your website). Google Drive and Dropbox share links won't work.</p>
       </div>
       <${Field} label="Date"><${Input} type="date" value=${f.date} onChange=${e => set('date', e.target.value)} /><//>
       <${Field} label="Time"><${Input} type="time" value=${f.time} onChange=${e => set('time', e.target.value)} /><//>
       ${f.platforms.includes('instagram') && html`<${Field} label="Instagram format"><${Select} value=${f.igType} onChange=${v => set('igType', v)} options=${[{ v: '', l: 'Automatic (reel for video)' }, { v: 'post', l: 'Feed post' }, { v: 'reel', l: 'Reel' }, { v: 'story', l: 'Story' }]} /><//>`}
       ${(f.platforms.includes('instagram') || f.platforms.includes('linkedin')) && html`<${Field} label="First comment (Instagram, LinkedIn)"><${Input} value=${f.firstComment} onChange=${e => set('firstComment', e.target.value)} placeholder="Extra hashtags or a link" /><//>`}
-      <${Field} label="Visual brief" className="sm:col-span-2" hint="What the image or video should show — paste it into Canva, Higgsfield or brief a designer."><${Area} rows="2" value=${f.visual} onChange=${e => set('visual', e.target.value)} /><//>
+      <${Field} label="Visual brief" className="sm:col-span-2" hint=${images && images.ready ? 'What the image should show. Make image turns it into a picture; or paste it into Canva or Higgsfield.' : 'What the image or video should show — paste it into Canva, Higgsfield or brief a designer.'}><${Area} rows="2" value=${f.visual} onChange=${e => set('visual', e.target.value)} /><//>
+      ${images && images.ready && html`<div className="sm:col-span-2 -mt-1 flex items-center gap-2 flex-wrap"><${Btn} small kind="ghost" onClick=${draw} disabled=${drawing || !String(f.visual || f.title).trim()}>${drawing ? 'Making image…' : '✦ Make image from brief'}</${Btn}>${images.hosting === 'local' && html`<span className="text-[11px] text-amber-700 dark:text-amber-300">Images stay on this server until CLOUDINARY_URL is set, so Buffer can't use them.</span>`}</div>`}
       <${Field} label="Video script" className="sm:col-span-2"><${Area} rows="3" value=${f.script} onChange=${e => set('script', e.target.value)} placeholder="Beats for a reel or short, with on-screen text" /><//>
       <${Field} label="Notes" className="sm:col-span-2"><${Input} value=${f.notes} onChange=${e => set('notes', e.target.value)} /><//>
     </div>
@@ -918,7 +889,7 @@ function PublishModal({ post, social, channels, store, toast, onClose, onDone })
   <//>`;
 }
 
-function ContentView({ store, caps, toast, prefill, clearPrefill }) {
+function ContentView({ store, caps, toast, prefill, clearPrefill, onImport }) {
   const { data, add, update, remove } = store;
   const ref = useRef(store); ref.current = store;
   const [social, setSocial] = useState(null);
@@ -930,7 +901,15 @@ function ContentView({ store, caps, toast, prefill, clearPrefill }) {
   const [publishing, setPublishing] = useState(null);
   const [gen, setGen] = useState({ brand: 'dj', goal: '', platforms: ['instagram', 'tiktok'], count: '5', offerId: '' });
   const [busy, setBusy] = useState(false);
+  const [server, setServer] = useState(null);
+  const [insights, setInsights] = useState(() => (store.settings.social || {}).insights || null);
+  const [insBusy, setInsBusy] = useState(false);
+  const [useResults, setUseResults] = useState(true);
+  const [withImages, setWithImages] = useState(false);
+  const [drawing, setDrawing] = useState({});
+  const images = server && server.images;
 
+  useEffect(() => { window.SoulveeOS.health().then(setServer, () => setServer({})); }, []);
   useEffect(() => { if (prefill) { setGen(g => ({ ...g, ...prefill })); clearPrefill(); window.scrollTo({ top: 0 }); } }, [prefill]);
   useEffect(() => {
     let alive = true;
@@ -959,43 +938,68 @@ function ContentView({ store, caps, toast, prefill, clearPrefill }) {
   }, [pendingKey]);
 
   const brandOffers = data.offers.filter(o => o.brand === gen.brand && o.status !== 'retired');
+  const recentTitles = b => data.content.filter(p => p.brand === b).sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt))).slice(0, 15).map(p => p.title).filter(Boolean);
+
+  // Makes an image from a post's visual brief and adds it to the post.
+  const makeImage = async p => {
+    setDrawing(m => ({ ...m, [p.id]: true }));
+    const ok = await window.SoulveeOS.images.generate({ brand: p.brand, visual: p.visual, format: p.format, platforms: p.platforms, title: p.title }).then(async r => {
+      const latest = ref.current.data.content.find(x => x.id === p.id) || p;
+      await ref.current.update('content', p.id, { media: [...(latest.media || []), { type: 'image', url: r.media.url }] });
+      return true;
+    }, e => { toast(e.message); return false; });
+    setDrawing(m => { const next = { ...m }; delete next[p.id]; return next; });
+    return ok;
+  };
+  const makeImages = async list => {
+    for (const [i, p] of list.entries()) {
+      toast(`Making images ${i + 1} of ${list.length}…`);
+      if (!(await makeImage(p))) return;
+    }
+    if (list.length) toast(`${list.length} image${list.length === 1 ? '' : 's'} added`);
+  };
+
+  // Reads results from Buffer, keeps a summary for the AI, and puts the numbers on matching posts.
+  const loadInsights = async refresh => {
+    setInsBusy(true);
+    try {
+      const r = await window.SoulveeOS.social.insights(TZ, refresh);
+      const keep = { learnings: r.learnings, at: r.updatedAt, count: r.count, platforms: r.platforms, bestHour: r.bestHour, top: r.posts.slice(0, 5) };
+      setInsights(keep);
+      const latest = store.latestSettings();
+      await store.saveSettings({ ...latest, social: { ...(latest.social || {}), insights: keep } });
+      const byId = {};
+      r.posts.forEach(x => { byId[x.id] = x; });
+      for (const p of ref.current.data.content) {
+        const hits = ((p.publish && p.publish.results) || []).filter(x => x.ok && byId[x.postId]).map(x => byId[x.postId]);
+        if (!hits.length) continue;
+        const rates = hits.filter(h => h.rate !== null).map(h => h.rate);
+        const metrics = { rate: rates.length ? Math.max(...rates) : null, seen: hits.reduce((t, h) => t + (h.seen || 0), 0), reactions: hits.reduce((t, h) => t + (h.metrics.reactions || 0), 0), comments: hits.reduce((t, h) => t + (h.metrics.comments || 0), 0), at: r.updatedAt };
+        await ref.current.update('content', p.id, { metrics, ...(p.status === 'scheduled' ? { status: 'posted', postedAt: hits[0].sentAt || new Date().toISOString() } : {}) });
+      }
+      toast(r.count ? `Results read from ${r.count} Buffer post${r.count === 1 ? '' : 's'}` : 'No results yet — Buffer collects them about a day after posting');
+    } catch (e) { toast(e.message); }
+    setInsBusy(false);
+  };
+
   const generate = async () => {
     if (!caps.sample || busy) return;
     const offer = data.offers.find(o => o.id === gen.offerId);
     const count = Math.max(1, Math.min(14, Math.round(num(gen.count)) || 5));
     const platforms = gen.platforms.length ? gen.platforms : ['instagram'];
+    const learnings = useResults && insights && insights.learnings ? insights.learnings : '';
     setBusy(true);
     try {
-      const tiers = offer ? (offer.tiers || []).filter(t => num(t.price) > 0).map(t => `${t.name} ${ngn(t.price)}`).join(', ') : '';
-      const prompt = `${voiceFor(gen.brand)}
-You are also the social media content lead for ${brandOf(gen.brand).name}. The audience is Lagos-first with global reach; Nigerian English or light Pidgin is welcome where it fits the brand.
-Today is ${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}.
-Goal: ${gen.goal.trim() || 'grow the audience and bring in paying clients'}.
-${offer ? `Promote this offer: ${offer.name}. ${offer.pitch || ''}${tiers ? ' Prices: ' + tiers + '.' : ''}` : ''}
-Platforms to cover: ${platforms.map(id => platformOf(id).name).join(', ')}.
-Write ${count} distinct posts for the next ${Math.min(14, Math.max(7, count))} days, spread across those platforms, with a mix of formats (reels or short videos, carousels, single images, stories, text).
-- caption: ready to post, starting with a scroll-stopping hook, written in the brand voice, with one clear call to action (DM, link in bio, book, buy). No hashtags inside the caption.
-- Any post that includes X must keep caption plus hashtags under 270 characters; Threads under 480. Other captions up to about 150 words.
-- hashtags: 3 to 8 relevant tags without the # sign, mixing broad and Lagos or Nigeria-specific ones (at most 3 if the post includes LinkedIn).
-- visual: a short brief a designer or an image tool can follow (subject, setting, colours, text overlay).
-- script: for reels and short videos, 4 to 6 timed beats with on-screen text; otherwise an empty string.
-- day: days from today (0 to 13). time: a good local posting time for that platform and audience, as HH:MM in 24-hour time.
-- Never invent prices, dates, venues, guests or client names that aren't given here.`;
+      const prompt = SHARED.contentPrompt({ brand: gen.brand, goal: gen.goal, offer, platforms, count, firstDay: 0, lastDay: 13, today: new Date(), tz: TZ, learnings, recent: recentTitles(gen.brand) });
       const v = await askJSON(caps.sample, prompt, CONTENT_SCHEMA, 'medium');
       const items = (Array.isArray(v.posts) ? v.posts : []).slice(0, 14);
-      for (const p of items) {
-        const chosen = (p.platforms || []).filter(id => PLATFORMS.some(x => x.id === id));
-        const tags = tagLine(p.hashtags);
-        await add('content', {
-          brand: gen.brand, title: String(p.title || '').trim() || 'Post idea', text: [String(p.caption || '').trim(), tags].filter(Boolean).join('\n\n'),
-          platforms: chosen.length ? chosen : platforms, format: p.format || '', visual: p.visual || '', script: p.script || '',
-          media: [], status: 'draft', scheduledAt: slotFor(p.day, p.time), igType: p.format === 'story' ? 'story' : p.format === 'reel' ? 'reel' : '',
-          ytCategory: YT_CATEGORY[gen.brand] || '22', firstComment: '', notes: '', aiAssisted: true,
-          source: offer ? { type: 'offer', id: offer.id, label: offer.name } : { type: 'topic', label: gen.goal.trim() },
-        });
-      }
+      const created = [];
+      for (const p of items) created.push(await add('content', SHARED.draftFromAi(p, { brand: gen.brand, platforms, tz: TZ, firstDay: 0, lastDay: 13, source: offer ? { type: 'offer', id: offer.id, label: offer.name } : { type: 'topic', label: gen.goal.trim() } })));
       toast(items.length ? `${items.length} drafts added — review and approve them below` : 'The AI returned no posts. Try again.');
       setFilter('active');
+      setBusy(false);
+      if (withImages && images && images.ready) await makeImages(created.filter(d => String(d.visual || '').trim()));
+      return;
     } catch (e) { toast(sampleMessage(e)); }
     setBusy(false);
   };
@@ -1041,6 +1045,10 @@ Write ${count} distinct posts for the next ${Math.min(14, Math.max(7, count))} d
         <${Field} label="How many posts"><${Select} value=${String(gen.count)} onChange=${v => setGen({ ...gen, count: v })} options=${['3', '5', '7', '10', '14']} /><//>
         <div className="sm:col-span-3"><span className=${'block text-xs font-medium mb-1 ' + muted}>Platforms</span><${PlatformToggles} value=${gen.platforms} onChange=${v => setGen({ ...gen, platforms: v })} /></div>
       </div>
+      <div className="mt-3 flex flex-wrap gap-4 text-xs">
+        ${insights && insights.learnings && html`<label className="flex items-center gap-2"><input type="checkbox" checked=${useResults} onChange=${e => setUseResults(e.target.checked)} /> Use what's working (${insights.count} posts)</label>`}
+        ${images && images.ready && html`<label className="flex items-center gap-2"><input type="checkbox" checked=${withImages} onChange=${e => setWithImages(e.target.checked)} /> Make an image for each post</label>`}
+      </div>
       <div className="mt-3 flex gap-2 flex-wrap">
         <${Btn} onClick=${generate} disabled=${busy || !gen.platforms.length}>${busy ? 'Writing posts…' : 'Generate posts'}</${Btn}>
         <button type="button" onClick=${() => setGen({ ...gen, goal: 'Plan a full week of content: one post a day', count: '7' })} className="text-xs px-3 py-1.5 rounded-full bg-slate-100 dark:bg-white/10">Plan my week</button>
@@ -1048,6 +1056,11 @@ Write ${count} distinct posts for the next ${Math.min(14, Math.max(7, count))} d
         <button type="button" onClick=${() => setGen({ ...gen, brand: 'smc', goal: 'Show Lagos restaurants and hotels how AI automation saves them time and money', count: '5', platforms: ['linkedin', 'instagram', 'x'] })} className="text-xs px-3 py-1.5 rounded-full bg-slate-100 dark:bg-white/10">SMC thought leadership</button>
       </div>`}
     <//>
+
+    <div className="grid lg:grid-cols-2 gap-4 items-start">
+      <${AutopilotCard} store=${store} toast=${toast} images=${images} onImport=${onImport} />
+      <${ResultsCard} insights=${insights} social=${social} busy=${insBusy} onRefresh=${() => loadInsights(true)} />
+    </div>
 
     <${Section} title="Content plan" action=${html`<${Chips} value=${filter} onChange=${setFilter} options=${[{ v: 'active', l: 'To do' }, { v: 'posted', l: 'Posted' }, { v: 'all', l: 'All' }]} />`}>
       <${Chips} value=${brand} onChange=${setBrand} options=${[{ v: 'all', l: 'All brands' }, ...BRANDS.map(b => ({ v: b.id, l: b.short }))]} />
@@ -1063,12 +1076,13 @@ Write ${count} distinct posts for the next ${Math.min(14, Math.max(7, count))} d
                 <p className="font-semibold truncate">${p.title || 'Untitled post'}</p>
                 <div className="flex gap-1.5 mt-1 flex-wrap"><${BrandChip} id=${p.brand} /><${Pill} tone=${STATUS_TONE[p.status] || 'slate'}>${p.status}</${Pill}>${(p.platforms || []).map(id => html`<${Pill} key=${id}>${platformOf(id).name}</${Pill}>`)}</div>
               </div>
-              <div className="text-right shrink-0 text-[11px]">${p.scheduledAt ? html`<p className="font-semibold">${hhmm(new Date(p.scheduledAt))}</p>` : null}${p.aiAssisted && html`<p className=${muted}>AI draft</p>`}</div>
+              <div className="text-right shrink-0 text-[11px]">${p.scheduledAt ? html`<p className="font-semibold">${hhmm(new Date(p.scheduledAt))}</p>` : null}${p.autopilot ? html`<p className="text-violet-600 dark:text-violet-300">Autopilot</p>` : p.aiAssisted && html`<p className=${muted}>AI draft</p>`}</div>
             </div>
             <div className="flex gap-3 mt-2">
               ${img && html`<img src=${img.url} alt="" className="w-16 h-16 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-white/10" />`}
               <p className="text-xs whitespace-pre-wrap line-clamp-4 flex-1 min-w-0">${p.text}</p>
             </div>
+            ${p.metrics && html`<p className="text-[11px] mt-2 font-medium text-emerald-600 dark:text-emerald-400">📈 ${[p.metrics.rate !== null && p.metrics.rate !== undefined ? p.metrics.rate + '% engagement' : '', p.metrics.seen ? fmtCount(p.metrics.seen) + ' reached' : '', p.metrics.reactions ? p.metrics.reactions + ' reactions' : '', p.metrics.comments ? p.metrics.comments + ' comments' : ''].filter(Boolean).join(' · ') || 'No numbers yet'}</p>`}
             ${p.visual && html`<p className=${'text-[11px] mt-2 line-clamp-2 ' + muted}><span className="font-semibold">Visual:</span> ${p.visual}</p>`}
             ${warn.length > 0 && p.status !== 'posted' && html`<p className="text-[11px] mt-2 text-amber-700 dark:text-amber-300">⚠ ${warn.join(' · ')}</p>`}
             ${p.status === 'scheduled' && p.publish && html`<p className=${'text-[11px] mt-2 ' + muted}>${p.publish.target === 'buffer' ? `In Buffer · ${res.filter(r => r.ok).length}/${res.length} channels${p.publish.when === 'now' ? ' · posting now' : ''}` : `Webhook · ${p.publish.when === 'now' ? 'sending now' : 'sends ' + fmtSlot(p.publish.runAt || p.scheduledAt)}`}</p>`}
@@ -1079,6 +1093,7 @@ Write ${count} distinct posts for the next ${Math.min(14, Math.max(7, count))} d
               ${p.status === 'scheduled' && p.publish && p.publish.jobId && html`<${Btn} small kind="ghost" onClick=${() => cancelJob(p)}>Cancel</${Btn}>`}
               ${p.status === 'scheduled' && p.publish && p.publish.target === 'buffer' && html`<a href="https://publish.buffer.com" target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Open Buffer</a>`}
               ${p.status === 'scheduled' && html`<${Btn} small kind="good" onClick=${() => update('content', p.id, { status: 'posted', postedAt: new Date().toISOString() })}>Mark posted</${Btn}>`}
+              ${images && images.ready && !(p.media || []).length && String(p.visual || '').trim() && p.status !== 'posted' && html`<${Btn} small kind="ghost" onClick=${() => makeImage(p)} disabled=${!!drawing[p.id]}>${drawing[p.id] ? 'Making image…' : 'Make image'}</${Btn}>`}
               <${Btn} small kind="ghost" onClick=${() => copyText(p.text, toast)}>Copy</${Btn}>
               <${Btn} small kind="ghost" onClick=${() => setEditing(p)}>Edit</${Btn}>
               ${p.status === 'posted' && html`<${Btn} small kind="ghost" onClick=${async () => { await add('content', { ...p, id: undefined, createdAt: undefined, status: 'draft', scheduledAt: '', publish: null, postedAt: null, title: (p.title || 'Post') + ' (again)' }); toast('Copied as a new draft'); }}>Reuse</${Btn}>`}
@@ -1088,9 +1103,139 @@ Write ${count} distinct posts for the next ${Math.min(14, Math.max(7, count))} d
         })}</div>
       </div>`)}
     <//>
-    ${editing && html`<${PostModal} post=${editing} caps=${caps} toast=${toast} onClose=${() => setEditing(null)} onSave=${savePost} />`}
+    ${editing && html`<${PostModal} post=${editing} caps=${caps} toast=${toast} images=${images} onClose=${() => setEditing(null)} onSave=${savePost} />`}
     ${publishing && social && html`<${PublishModal} post=${publishing} social=${social} channels=${channels} store=${store} toast=${toast} onClose=${() => setPublishing(null)} onDone=${patch => update('content', publishing.id, patch)} />`}
   </div>`;
+}
+
+/* ---------------- Autopilot and results ---------------- */
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const ZONES = ['Africa/Lagos', 'Europe/London', 'America/New_York', 'Asia/Dubai', 'UTC'];
+// A moment shown on the autopilot's own clock (it runs on that time zone, wherever this device is).
+const fmtIn = (iso, tz) => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleString('en-GB', { timeZone: tz || TZ, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+const fmtCount = n => Number(n || 0) >= 1000 ? (Math.round(Number(n) / 100) / 10).toLocaleString('en-NG') + 'K' : String(Math.round(Number(n || 0)));
+
+// What autopilot needs to know when it runs on the server: live offers and recent post titles per brand.
+function autopilotContext(store) {
+  const offers = store.data.offers.filter(o => o.status !== 'retired').map(o => ({ id: o.id, brand: o.brand, name: o.name, pitch: o.pitch || '', tiers: (o.tiers || []).map(t => ({ name: t.name, price: num(t.price) })) }));
+  const recent = {};
+  BRANDS.forEach(b => { recent[b.id] = store.data.content.filter(p => p.brand === b.id).sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt))).slice(0, 30).map(p => p.title).filter(Boolean); });
+  return { offers, recent };
+}
+
+function AutopilotCard({ store, toast, images, onImport }) {
+  const [st, setSt] = useState(null);
+  const [f, setF] = useState(null);
+  const [busy, setBusy] = useState('');
+  const formFrom = s => ({
+    enabled: !!s.enabled, day: String(s.day), time: s.time, timezone: s.timezone, learn: s.learn !== false, notify: s.notify !== false,
+    plans: (s.plans && s.plans.length ? s.plans : [{ brand: 'dj', count: 5, platforms: ['instagram', 'tiktok'], goal: '', offerId: '', images: !!(images && images.ready), enabled: true }]).map(p => ({ ...p, count: String(p.count) })),
+  });
+  const load = async () => {
+    const s = await window.SoulveeOS.autopilot.status().catch(e => ({ allowed: false, error: e.message }));
+    setSt(s);
+    if (s.allowed) setF(prev => prev || formFrom(s));
+    return s;
+  };
+  useEffect(() => { load(); }, []);
+  // Follow a run until it finishes, then bring its drafts into the plan.
+  const running = !!(st && st.running);
+  useEffect(() => {
+    if (!running) return undefined;
+    const timer = setInterval(async () => {
+      const s = await load();
+      if (s && s.allowed && !s.running) { clearInterval(timer); await onImport(); }
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  const setPlan = (i, k, v) => setF(p => ({ ...p, plans: p.plans.map((x, j) => j === i ? { ...x, [k]: v } : x) }));
+  const payload = enabled => ({ ...f, enabled, day: num(f.day), plans: f.plans.map(p => ({ ...p, count: num(p.count) })) });
+  const save = async enabled => {
+    setBusy('save');
+    try {
+      await window.SoulveeOS.autopilot.context(autopilotContext(store));
+      const s = await window.SoulveeOS.autopilot.save(payload(enabled));
+      setSt({ allowed: true, ...s });
+      setF(formFrom(s));
+      toast(s.enabled ? `Autopilot is on — next run ${fmtIn(s.nextRun, s.timezone)}` : 'Autopilot settings saved (it is off)');
+    } catch (e) { toast(e.message); }
+    setBusy('');
+  };
+  const runNow = async () => {
+    setBusy('run');
+    try {
+      await window.SoulveeOS.autopilot.context(autopilotContext(store));
+      await window.SoulveeOS.autopilot.save(payload(f.enabled));
+      const s = await window.SoulveeOS.autopilot.run();
+      setSt({ allowed: true, ...s });
+      toast('Autopilot is writing posts — they appear below when it finishes');
+    } catch (e) { toast(e.message); }
+    setBusy('');
+  };
+
+  const res = st && st.lastResult;
+  return html`<${Card}>
+    <div className="flex items-center justify-between gap-2 flex-wrap">
+      <p className="font-semibold text-sm">⟳ Autopilot ${st && st.allowed ? html`<${Pill} tone=${st.enabled ? 'green' : 'slate'}>${st.enabled ? 'on' : 'off'}</${Pill}>` : null}</p>
+      ${f && st && st.allowed && st.ready && html`<${Btn} small kind=${f.enabled ? 'ghost' : 'primary'} onClick=${() => save(!f.enabled)} disabled=${!!busy || running}>${f.enabled ? 'Turn off' : 'Turn on'}</${Btn}>`}
+    </div>
+    <p className=${'text-xs mt-1 ' + muted}>Every week it drafts the coming week's posts for the brands below, with images if you like, learning from your Buffer results. Drafts appear here for you to approve. Nothing is posted until you do.</p>
+    ${!st && html`<p className=${'text-xs mt-3 ' + muted}>Checking…</p>`}
+    ${st && !st.allowed && html`<p className="text-xs mt-3 text-amber-700 dark:text-amber-300">${st.error || 'Autopilot can only be set up from the computer running Soulvee OS, or with SOULVEE_ACCESS_TOKEN set and the app opened once with ?token=YOUR_TOKEN.'}</p>`}
+    ${st && st.allowed && !st.ready && html`<p className="text-xs mt-3 text-amber-700 dark:text-amber-300">Autopilot needs AI: add ANTHROPIC_API_KEY to the server and restart it.</p>`}
+    ${f && st && st.allowed && html`<div className="mt-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span>Every</span>
+        <select className=${inputCls + ' !w-auto'} aria-label="Autopilot day" value=${f.day} onChange=${e => setF({ ...f, day: e.target.value })}>${DAY_NAMES.map((d, i) => html`<option key=${d} value=${String(i)}>${d}</option>`)}</select>
+        <span>at</span>
+        <input type="time" aria-label="Autopilot time" className=${inputCls + ' !w-auto'} value=${f.time} onChange=${e => setF({ ...f, time: e.target.value })} />
+        <select className=${inputCls + ' !w-auto'} aria-label="Autopilot time zone" value=${f.timezone} onChange=${e => setF({ ...f, timezone: e.target.value })}>${[...new Set([f.timezone, ...ZONES])].map(z => html`<option key=${z} value=${z}>${z}</option>`)}</select>
+      </div>
+      <div className="space-y-2">${f.plans.map((p, i) => html`<div key=${i} className="p-3 rounded-xl bg-slate-50 dark:bg-white/5 space-y-2" data-plan=${i}>
+        <div className="grid sm:grid-cols-3 gap-2">
+          <select className=${inputCls} aria-label="Plan brand" value=${p.brand} onChange=${e => { setPlan(i, 'brand', e.target.value); setPlan(i, 'offerId', ''); }}>${BRANDS.map(b => html`<option key=${b.id} value=${b.id}>${b.name}</option>`)}</select>
+          <select className=${inputCls} aria-label="Posts per week" value=${p.count} onChange=${e => setPlan(i, 'count', e.target.value)}>${['3', '5', '7', '10', '14'].map(n => html`<option key=${n} value=${n}>${n} posts a week</option>`)}</select>
+          <select className=${inputCls} aria-label="Plan offer" value=${p.offerId || ''} onChange=${e => setPlan(i, 'offerId', e.target.value)}><option value="">No offer to push</option>${store.data.offers.filter(o => o.brand === p.brand && o.status !== 'retired').map(o => html`<option key=${o.id} value=${o.id}>Push: ${o.name}</option>`)}</select>
+        </div>
+        <input className=${inputCls} aria-label="Plan goal" value=${p.goal} onChange=${e => setPlan(i, 'goal', e.target.value)} placeholder="Goal, e.g. fill December wedding bookings" />
+        <${PlatformToggles} value=${p.platforms} onChange=${v => setPlan(i, 'platforms', v)} />
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked=${!!p.images} disabled=${!(images && images.ready)} onChange=${e => setPlan(i, 'images', e.target.checked)} /> Make an image for each post${images && images.ready ? '' : ' (add OPENAI_API_KEY to the server)'}</label>
+          ${f.plans.length > 1 && html`<button type="button" className="text-xs text-rose-500" onClick=${() => setF({ ...f, plans: f.plans.filter((_, j) => j !== i) })}>Remove</button>`}
+        </div>
+      </div>`)}</div>
+      ${f.plans.length < 10 && html`<button type="button" className="text-xs text-violet-500 font-medium" onClick=${() => setF({ ...f, plans: [...f.plans, { brand: BRANDS.find(b => !f.plans.some(p => p.brand === b.id)) ? BRANDS.find(b => !f.plans.some(p => p.brand === b.id)).id : 'smc', count: '5', platforms: ['instagram'], goal: '', offerId: '', images: false, enabled: true }] })}>+ Add a brand</button>`}
+      <div className="flex flex-wrap gap-4 text-xs">
+        <label className="flex items-center gap-2"><input type="checkbox" checked=${f.learn} onChange=${e => setF({ ...f, learn: e.target.checked })} /> Learn from Buffer results${st.buffer ? '' : ' (connect Buffer first)'}</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked=${f.notify} onChange=${e => setF({ ...f, notify: e.target.checked })} /> Ping my webhook when drafts are ready${st.webhook ? '' : ' (no webhook set)'}</label>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        <${Btn} small onClick=${() => save(f.enabled)} disabled=${!!busy || running}>${busy === 'save' ? 'Saving…' : 'Save'}</${Btn}>
+        <${Btn} small kind="ghost" onClick=${runNow} disabled=${!!busy || running || !st.ready}>${running ? 'Running…' : busy === 'run' ? 'Starting…' : 'Run now'}</${Btn}>
+      </div>
+      <div className=${'text-xs space-y-0.5 ' + muted}>
+        ${running && html`<p className="text-violet-600 dark:text-violet-300 font-medium">${st.progress || 'Working'}…</p>`}
+        ${st.enabled && st.nextRun && html`<p>Next run: ${fmtIn(st.nextRun, st.timezone)} (${st.timezone} time)</p>`}
+        ${res && html`<p>Last run: ${fmtIn(res.at, st.timezone)} — ${res.drafts} draft${res.drafts === 1 ? '' : 's'}${res.images ? `, ${res.images} with images` : ''}${res.trigger === 'manual' ? ' (run by hand)' : ''}</p>`}
+        ${res && (res.problems || []).map(pr => html`<p key=${pr} className="text-rose-600 dark:text-rose-400">✕ ${pr}</p>`)}
+      </div>
+    </div>`}
+  <//>`;
+}
+
+function ResultsCard({ insights, social, busy, onRefresh }) {
+  if (!social || !social.buffer) return html`<${Card}><p className="font-semibold text-sm">📈 What's working</p><p className=${'text-xs mt-1 ' + muted}>Connect Buffer to see how your posts perform. The generator and autopilot then learn from it.</p><//>`;
+  return html`<${Card}>
+    <div className="flex items-center justify-between gap-2 flex-wrap"><p className="font-semibold text-sm">📈 What's working</p><${Btn} small kind="ghost" onClick=${onRefresh} disabled=${busy || !social.allowed}>${busy ? 'Reading Buffer…' : insights ? 'Refresh' : 'Read results from Buffer'}</${Btn}></div>
+    ${!insights && html`<p className=${'text-xs mt-1 ' + muted}>Reads the last 60 days of results from Buffer. The generator and autopilot use them to pick formats, topics and times.</p>`}
+    ${insights && insights.count === 0 && html`<p className=${'text-xs mt-1 ' + muted}>No results yet. Buffer collects them about a day after a post goes out.</p>`}
+    ${insights && insights.count > 0 && html`<div className="mt-2 space-y-2">
+      <div className="flex flex-wrap gap-1.5">${(insights.platforms || []).map(p => html`<${Pill} key=${p.service} tone="green">${p.label} ${p.rate}% · ${p.posts}</${Pill}>`)}${insights.bestHour ? html`<${Pill} tone="violet">Best hour ~${String(insights.bestHour.hour).padStart(2, '0')}:00</${Pill}>` : null}</div>
+      <div className="space-y-1">${(insights.top || []).map(p => html`<div key=${p.id} className="flex justify-between gap-3 text-xs p-2 rounded-lg bg-slate-50 dark:bg-white/5"><span className="min-w-0 truncate">${SERVICE_LABEL[p.service] || p.service || ''} · ${p.text}</span><span className="shrink-0 font-semibold">${p.rate !== null ? p.rate + '%' : p.actions + ' interactions'}${p.seen ? ' · ' + fmtCount(p.seen) : ''}</span></div>`)}</div>
+      <p className=${'text-[11px] ' + muted}>Updated ${fmtSlot(insights.at)} · ${insights.count} posts with results</p>
+    </div>`}
+  <//>`;
 }
 
 /* ---------------- Setup: AI check and social publishing ---------------- */
@@ -1113,11 +1258,15 @@ function SocialSetup({ store, toast }) {
   const [channels, setChannels] = useState([]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
+  const [server, setServer] = useState(null);
+  const [pilot, setPilot] = useState(null);
   const load = async refresh => {
     setBusy('load'); setErr('');
     try {
       const s = await window.SoulveeOS.social.status();
       setStatus(s);
+      window.SoulveeOS.health().then(setServer, () => {});
+      window.SoulveeOS.autopilot.status().then(setPilot, () => {});
       if (s.buffer && s.allowed) setChannels((await window.SoulveeOS.social.channels(refresh)).channels);
     } catch (e) { setErr(e.message); }
     setBusy('');
@@ -1145,7 +1294,11 @@ function SocialSetup({ store, toast }) {
       ${row('Buffer (Instagram, TikTok, Facebook, LinkedIn, X, Threads, YouTube, Pinterest)', status.buffer ? 'Connected' : 'Not set up', status.buffer)}
       ${row('Webhook (Make, Zapier, n8n)', status.webhook ? (status.signed ? 'On · signed' : 'On') : 'Not set up', status.webhook)}
       ${row('Publishing from this device', status.allowed ? 'Allowed' : 'Locked', status.allowed)}
+      ${server && server.images && row('Images (OpenAI' + (server.images.ready ? ' · ' + server.images.model : '') + ')', !server.images.ready ? 'Not set up' : server.images.hosting === 'cloudinary' ? 'On · Cloudinary' : server.images.hosting === 'server' ? 'On · PUBLIC_URL' : 'On · this server only', server.images.ready)}
+      ${pilot && pilot.allowed && row('Autopilot', pilot.enabled ? `On · next ${fmtIn(pilot.nextRun, pilot.timezone)}` : 'Off (set it up in Content)', pilot.enabled)}
     </div>`}
+    ${server && server.images && server.images.ready && server.images.hosting === 'local' && html`<p className="text-xs mt-3 text-amber-700 dark:text-amber-300">Images are kept on this server only, so Buffer can't fetch them. Add CLOUDINARY_URL (or PUBLIC_URL if the server is online) and restart.</p>`}
+    ${server && server.images && !server.images.ready && html`<p className=${'text-xs mt-3 ' + muted}>To make images from each post's brief, add OPENAI_API_KEY and CLOUDINARY_URL to the server's .env and restart it.</p>`}
     ${status && !status.buffer && !status.webhook && html`<p className=${'text-xs mt-3 ' + muted}>To post automatically, add BUFFER_API_KEY (from Buffer → Settings → API) or SOCIAL_WEBHOOK_URL to the server's .env and restart it. Until then, posts can be copied and posted by hand. The README has the steps.</p>`}
     ${status && !status.allowed && (status.buffer || status.webhook) && html`<p className="text-xs mt-3 text-amber-700 dark:text-amber-300">Publishing works only from the computer running Soulvee OS until SOULVEE_ACCESS_TOKEN is set. Then open the app once with ?token=YOUR_TOKEN on each device.</p>`}
     ${status && status.webhook && status.allowed && html`<div className="mt-3"><${Btn} small kind="ghost" onClick=${testHook} disabled=${!!busy}>${busy === 'hook' ? 'Sending…' : 'Send a test post to the webhook'}</${Btn}></div>`}
@@ -1535,7 +1688,9 @@ function AssistantView({ store, caps, toast }) {
     { name: 'create_draft_invoice', description: 'Create a DRAFT invoice (never sent or marked paid). Use only when Soulvee asks for an invoice.', inputSchema: { type: 'object', required: ['client', 'brand', 'items'], properties: { client: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, vat: { type: 'boolean' }, items: { type: 'array', items: { type: 'object', properties: { desc: { type: 'string' }, amount: { type: 'number' } } } } } },
       execute: async a => { const st = ref.current.latestSettings(); const number = invNumber(a.client, st.invoiceSeq); await ref.current.add('invoices', { number, client: a.client, clientEmail: '', brand: a.brand, items: (a.items || []).map(i => ({ desc: i.desc || '', amount: num(i.amount) })), vat: a.vat !== false, wht: 0, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft', offerId: '', dealId: '' }); await ref.current.saveSettings({ ...st, invoiceSeq: num(st.invoiceSeq) + 1 }); setActs(x => [...x, `Drafted invoice ${number}`]); return { ok: true, number }; } },
     { name: 'list_content', description: 'Social posts in the content plan: title, brand, platforms, status (idea, draft, approved, scheduled, posted, failed) and scheduled time.', inputSchema: { type: 'object', properties: { status: { type: 'string', enum: POST_STATUS } } },
-      execute: ({ status } = {}) => ref.current.data.content.filter(p => !status || p.status === status).slice(0, 40).map(p => ({ title: p.title, brand: brandOf(p.brand).name, platforms: p.platforms, status: p.status, scheduledAt: p.scheduledAt || null, caption: String(p.text || '').slice(0, 280) })) },
+      execute: ({ status } = {}) => ref.current.data.content.filter(p => !status || p.status === status).slice(0, 40).map(p => ({ title: p.title, brand: brandOf(p.brand).name, platforms: p.platforms, status: p.status, scheduledAt: p.scheduledAt || null, caption: String(p.text || '').slice(0, 280), results: p.metrics || null })) },
+    { name: 'get_social_results', description: 'How recent posts performed on Buffer: average engagement by platform, the best posting hour and the top posts. Use it when Soulvee asks what is working, and before planning content.', inputSchema: { type: 'object', properties: {} },
+      execute: async () => { const r = await window.SoulveeOS.social.insights(TZ, false); return { summary: r.learnings || 'No results yet: Buffer collects them about a day after posting.', platforms: r.platforms, bestHour: r.bestHour, top: r.posts.slice(0, 5).map(p => ({ platform: p.service, engagementRate: p.rate, reached: p.seen, text: p.text })) }; } },
     { name: 'create_content_drafts', description: 'Add social post drafts to the content plan for Soulvee to review and approve. Drafts are never published automatically. Use only when Soulvee asks for posts, captions or a content plan.', inputSchema: { type: 'object', required: ['posts'], properties: { posts: { type: 'array', items: { type: 'object', required: ['brand', 'caption', 'platforms'], properties: { brand: { type: 'string', enum: BRANDS.map(b => b.id) }, title: { type: 'string' }, caption: { type: 'string' }, hashtags: { type: 'array', items: { type: 'string' } }, platforms: { type: 'array', items: { type: 'string', enum: PLATFORMS.map(p => p.id) } }, day: { type: 'integer', description: 'Days from today, 0-13' }, time: { type: 'string', description: 'Local posting time as HH:MM' }, visual: { type: 'string' }, script: { type: 'string' } } } } } },
       execute: async a => { const posts = (a.posts || []).slice(0, 14); for (const p of posts) await ref.current.add('content', { brand: p.brand, title: p.title || 'Post idea', text: [String(p.caption || '').trim(), tagLine(p.hashtags)].filter(Boolean).join('\n\n'), platforms: p.platforms && p.platforms.length ? p.platforms : ['instagram'], media: [], status: 'draft', scheduledAt: p.day !== undefined || p.time ? slotFor(p.day || 0, p.time) : '', visual: p.visual || '', script: p.script || '', igType: '', ytCategory: YT_CATEGORY[p.brand] || '22', firstComment: '', notes: 'Added by assistant', aiAssisted: true }); setActs(x => [...x, `Added ${posts.length} post draft${posts.length === 1 ? '' : 's'} to Content`]); return { ok: true, added: posts.length }; } },
   ];
@@ -1543,7 +1698,7 @@ function AssistantView({ store, caps, toast }) {
   const preamble = () => `${voiceFor(voice)}
 You are also Soulvee's operations sub-agent inside Soulvee OS, the Soulveetainment Media Consults control unit, which runs four brands (DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emporium, EFR) plus digital products. Philosophy: systems over hustle.
 Today is ${fmtDate(localDate())}, Lagos. Money is NGN-first; format like ₦1,500,000. Lead with decisions and numbers, keep it skimmable.
-Use the tools to read real figures before answering money or pipeline questions — never invent numbers. Only create deals, offers, draft invoices or post drafts when explicitly asked. Post drafts go to the Content tab for Soulvee to approve; you can't publish anything yourself. When asked to reply to a client or fan message, write the reply in the brand voice above, ready to paste, and don't invent prices or dates that aren't in the catalogue or the message.
+Use the tools to read real figures before answering money or pipeline questions — never invent numbers. Only create deals, offers, draft invoices or post drafts when explicitly asked. Post drafts go to the Content tab for Soulvee to approve; you can't publish anything yourself. Check get_social_results before planning posts, so new drafts build on what is working. When asked to reply to a client or fan message, write the reply in the brand voice above, ready to paste, and don't invent prices or dates that aren't in the catalogue or the message.
 Plain text with short lines; simple dashes for lists; no markdown headers or tables.`;
 
   const send = async text => {
@@ -1565,7 +1720,7 @@ Plain text with short lines; simple dashes for lists; no markdown headers or tab
 
   if (caps.sample === null) return html`<${Section} title="AI sub-agent"><${Card}><${Empty} title="AI isn't available">${aiOffText()}<//><//><//>`;
 
-  const prompts = ['Where is my revenue this H2 — what should I chase first?', 'Which deals need a follow-up this week?', 'Draft a reply to a fan asking how to book DJ Soulvee for a December wedding', 'Turn my Google Workspace automation skill into an offer and save it', 'Draft three Instagram posts for DJ Soulvee about this weekend'];
+  const prompts = ['Where is my revenue this H2 — what should I chase first?', 'Which deals need a follow-up this week?', 'Draft a reply to a fan asking how to book DJ Soulvee for a December wedding', 'Turn my Google Workspace automation skill into an offer and save it', 'Draft three Instagram posts for DJ Soulvee about this weekend', 'What is working best on my socials right now?'];
   return html`<div className="space-y-4">
     <${Section} title="AI sub-agent" sub="Reads your live numbers, drafts replies in your voice, and logs deals, offers and draft invoices when you ask." action=${html`<div className="w-44"><${Select} value=${voice} onChange=${setVoice} options=${[{ v: 'dj', l: 'Voice: DJ Soulvee' }, { v: 'smc', l: 'Voice: SMC' }, { v: 'emporium', l: 'Voice: Emporium' }]} /></div>`} />
     <${Card} className="!p-0 overflow-hidden">
@@ -1751,6 +1906,38 @@ function App() {
   const openDeal = d => setDealEdit(d || {});
   const openInvoice = (inv, deal) => setInvEdit({ inv: inv || null, deal: deal || null });
   const startDeal = o => { const t = (o.tiers || []).find(t => num(t.price) > 0); setDealEdit({ brand: o.brand, offerId: o.id, value: t ? t.price : '', stage: 'lead', nextStep: o.firstMove || '' }); };
+  // Autopilot drafts wait on the server until this device brings them into the content plan.
+  const storeRef = useRef(store);
+  storeRef.current = store;
+  const [pilot, setPilot] = useState(null);
+  const importInbox = async () => {
+    const st = await window.SoulveeOS.autopilot.status().catch(() => null);
+    if (!st || !st.allowed) return 0;
+    setPilot(st);
+    if (!st.inbox) return 0;
+    const box = await window.SoulveeOS.autopilot.inbox().catch(() => ({ drafts: [] }));
+    const drafts = box.drafts || [];
+    for (const d of drafts) await storeRef.current.add('content', d);
+    if (drafts.length) {
+      await window.SoulveeOS.autopilot.ack(drafts.map(d => d.id)).catch(() => {});
+      toast(`Autopilot drafted ${drafts.length} post${drafts.length === 1 ? '' : 's'} — review them in Content`);
+    }
+    return drafts.length;
+  };
+  useEffect(() => {
+    if (store.mode !== 'db') return undefined;
+    importInbox();
+    const timer = setInterval(importInbox, 60000);
+    return () => clearInterval(timer);
+  }, [store.mode]);
+  // While autopilot is on, keep its copy of the offers and recent post titles up to date.
+  const ctxKey = pilot && pilot.enabled ? JSON.stringify([store.data.offers.map(o => [o.id, o.name, o.status, o.brand, (o.tiers || []).map(t => num(t.price))]), store.data.content.length]) : '';
+  useEffect(() => {
+    if (!ctxKey) return undefined;
+    const timer = setTimeout(() => window.SoulveeOS.autopilot.context(autopilotContext(storeRef.current)).catch(() => {}), 1500);
+    return () => clearTimeout(timer);
+  }, [ctxKey]);
+  const reviewCount = store.data.content.filter(p => p.status === 'draft' && p.autopilot).length;
   const promote = o => { setContentPrefill({ brand: o.brand, offerId: o.id, goal: `Promote ${o.name}` }); go('content'); };
   const saveDeal = async v => { if (dealEdit && dealEdit.id) await store.update('deals', dealEdit.id, v); else await store.add('deals', v); setDealEdit(null); toast('Deal saved'); };
 
@@ -1759,7 +1946,7 @@ function App() {
     command: html`<${CommandView} store=${store} caps=${caps} go=${go} openDeal=${openDeal} openInvoice=${openInvoice} />`,
     skills: html`<${SkillsView} store=${store} caps=${caps} toast=${toast} startDeal=${startDeal} promote=${promote} />`,
     pipeline: html`<${PipelineView} store=${store} caps=${caps} toast=${toast} openDeal=${openDeal} openInvoice=${openInvoice} />`,
-    content: html`<${ContentView} store=${store} caps=${caps} toast=${toast} prefill=${contentPrefill} clearPrefill=${() => setContentPrefill(null)} />`,
+    content: html`<${ContentView} store=${store} caps=${caps} toast=${toast} prefill=${contentPrefill} clearPrefill=${() => setContentPrefill(null)} onImport=${importInbox} />`,
     money: html`<${MoneyView} store=${store} toast=${toast} openInvoice=${openInvoice} />`,
     workspace: html`<${WorkspaceView} caps=${caps} toast=${toast} openDeal=${openDeal} />`,
     assistant: html`<${AssistantView} store=${store} caps=${caps} toast=${toast} />`,
@@ -1782,7 +1969,7 @@ function App() {
             <button onClick=${() => store.saveSettings({ ...store.settings, theme: dark ? 'light' : 'dark' })} className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/10 text-lg" aria-label="Toggle day and night mode">${dark ? '☀️' : '🌙'}</button>
           </div>
         </div>
-        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${tabs.map(t => html`<button key=${t.id} data-active=${tab === t.id ? 'true' : 'false'} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}</button>`)}</nav>
+        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${tabs.map(t => html`<button key=${t.id} data-active=${tab === t.id ? 'true' : 'false'} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}${t.id === 'content' && reviewCount ? html`<span className="ml-0.5 px-1.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-900" aria-label=${reviewCount + ' autopilot drafts to review'}>${reviewCount}</span>` : null}</button>`)}</nav>
       </div>
     </header>
     <main className="max-w-6xl mx-auto px-4 py-5 pb-24">

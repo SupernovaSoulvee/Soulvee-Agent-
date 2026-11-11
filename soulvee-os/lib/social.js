@@ -6,6 +6,7 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const store = require('./store');
+const shared = require('../public/shared.js');
 
 const SERVICES = new Set(['instagram', 'tiktok', 'facebook', 'linkedin', 'twitter', 'threads', 'youtube', 'pinterest', 'bluesky', 'mastodon', 'googlebusiness', 'substack']);
 const NEEDS_MEDIA = { instagram: 'an image or video', tiktok: 'a video or photos', youtube: 'a video', pinterest: 'an image or video' };
@@ -19,6 +20,7 @@ const CREATE = `mutation SoulveeCreatePost($input: CreatePostInput!) {
     ... on MutationError { message }
   }
 }`;
+const postsQuery = (org, since, after) => `query SoulveeResults { posts(first: 50${after ? `, after: ${JSON.stringify(after)}` : ''}, input: { organizationId: ${JSON.stringify(org)}, filter: { status: [sent], startDate: ${JSON.stringify(since)} } }) { edges { node { id text dueAt sentAt channelId channelService metrics { type value unit } metricsUpdatedAt } } pageInfo { endCursor hasNextPage } } }`;
 const channelsQuery = org => `query SoulveeChannels { channels(input: { organizationId: ${JSON.stringify(org)} }) { id name displayName service avatar isQueuePaused isDisconnected isLocked } }`;
 
 function create(env, dir) {
@@ -26,7 +28,7 @@ function create(env, dir) {
   const hook = { url: env.SOCIAL_WEBHOOK_URL || '', secret: env.SOCIAL_WEBHOOK_SECRET || '' };
   const tick = Number(env.SOULVEE_SCHEDULER_MS) || 30000;
   const queue = store.open(path.join(dir, 'social-queue.json'), () => ({ jobs: [] }));
-  const state = { cache: null, busy: false, timer: null };
+  const state = { cache: null, busy: false, timer: null, insights: null };
 
   function status() {
     return { buffer: !!buffer.key, webhook: !!hook.url, signed: !!(hook.url && hook.secret) };
@@ -188,7 +190,91 @@ function create(env, dir) {
     return deliver(sample, 'test');
   }
 
-  return { status, channels, publish, jobs, cancel, testHook, start };
+  // Recent sent posts with their results, newest first, across every Buffer organization.
+  async function sentPosts(days) {
+    const since = new Date(Date.now() - days * 864e5).toISOString();
+    const data = await gql(ORGANIZATIONS);
+    const orgs = (data.account && data.account.organizations) || [];
+    const posts = [];
+    for (const org of orgs) {
+      let after = null;
+      for (let page = 0; page < 4; page++) {
+        const out = await gql(postsQuery(org.id, since, after));
+        const conn = out.posts || {};
+        (conn.edges || []).forEach(e => { if (e && e.node) posts.push(e.node); });
+        if (!conn.pageInfo || !conn.pageInfo.hasNextPage) break;
+        after = conn.pageInfo.endCursor;
+      }
+    }
+    return posts;
+  }
+
+  // What has worked: per-post engagement from Buffer, plus a short summary the AI learns from.
+  // Cached for 30 minutes; Buffer itself refreshes metrics once a day.
+  async function insights(opts = {}) {
+    if (!buffer.key) throw fail('buffer_off', 'Buffer is not connected: add BUFFER_API_KEY to the server.');
+    const days = Math.max(7, Math.min(180, Number(opts.days) || 60));
+    const tz = opts.tz || 'Africa/Lagos';
+    const key = `${days}|${tz}`;
+    if (!opts.refresh && state.insights && state.insights.key === key && Date.now() - state.insights.at < 30 * 60e3) return state.insights.value;
+    const [posts, all] = await Promise.all([sentPosts(days), channels(false).catch(() => [])]);
+    const value = summarise(posts, all, days, tz);
+    state.insights = { key, at: Date.now(), value };
+    return value;
+  }
+
+  // A signed one-off event to the webhook, e.g. "autopilot.ready".
+  async function notify(event, data) {
+    if (!hook.url) return { ok: false, message: 'No webhook set.' };
+    return deliver({ id: `${event}_${crypto.randomUUID()}`, runAt: new Date().toISOString(), post: data }, event);
+  }
+
+  return { status, channels, publish, jobs, cancel, testHook, start, insights, notify };
+}
+
+const COUNT_KEYS = ['reactions', 'likes', 'comments', 'shares', 'reposts', 'saves', 'quotes', 'clicks', 'reach', 'impressions', 'views', 'follows'];
+
+// Engagement rate in %: Buffer's own figure when the network reports one, otherwise
+// interactions (comments, shares and saves weigh more than reactions) over reach, impressions or views.
+function engagement(m) {
+  const actions = (m.reactions || m.likes || 0) + 2 * (m.comments || 0) + 3 * ((m.shares || 0) + (m.reposts || 0) + (m.saves || 0)) + 2 * (m.quotes || 0);
+  const seen = m.reach || m.impressions || m.views || 0;
+  const rate = typeof m.engagementRate === 'number' ? m.engagementRate : seen > 0 ? (actions / seen) * 100 : null;
+  return { rate: rate === null ? null : Math.round(rate * 10) / 10, actions, seen };
+}
+
+function summarise(raw, allChannels, days, tz) {
+  const named = id => { const c = allChannels.find(x => x.id === id); return c ? c.displayName || c.name : ''; };
+  const posts = raw.filter(p => Array.isArray(p.metrics) && p.metrics.length).map(p => {
+    const m = {};
+    p.metrics.forEach(x => { if (x && x.type) m[x.type] = Number(x.value) || 0; });
+    const counts = {};
+    COUNT_KEYS.forEach(k => { if (m[k]) counts[k] = m[k]; });
+    const e = engagement(m);
+    return { id: p.id, channelId: p.channelId, channel: named(p.channelId), service: p.channelService, sentAt: p.sentAt || p.dueAt, text: String(p.text || '').slice(0, 280), metrics: counts, rate: e.rate, actions: e.actions, seen: e.seen };
+  });
+  // Ranked by engagement rate where there is one, then by interactions.
+  const ranked = [...posts].sort((a, b) => (b.rate === null ? -1 : b.rate) - (a.rate === null ? -1 : a.rate) || b.actions - a.actions);
+  const withRate = ranked.filter(p => p.rate !== null);
+  const avg = list => Math.round((list.reduce((t, p) => t + p.rate, 0) / list.length) * 10) / 10;
+  const byService = {};
+  withRate.forEach(p => { (byService[p.service] = byService[p.service] || []).push(p); });
+  const platforms = Object.entries(byService).map(([service, list]) => ({ service, label: label(service), posts: list.length, rate: avg(list) })).sort((a, b) => b.rate - a.rate);
+  const when = iso => { const p = shared.zoneParts(new Date(iso), tz); return { day: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][p.weekday], hour: p.hour, text: `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][p.weekday]} ${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}` }; };
+  const hours = {};
+  withRate.forEach(p => { if (p.sentAt) { const h = when(p.sentAt).hour; (hours[h] = hours[h] || []).push(p); } });
+  const bestHour = Object.entries(hours).filter(([, list]) => list.length >= 2).map(([h, list]) => ({ hour: +h, rate: avg(list), posts: list.length })).sort((a, b) => b.rate - a.rate)[0] || null;
+  const line = p => `- ${label(p.service || '')}${p.sentAt ? ' · ' + when(p.sentAt).text : ''} · ${p.rate !== null ? p.rate + '% engagement' : p.actions + ' interactions'}${p.seen ? ' · ' + p.seen.toLocaleString('en-NG') + ' reached' : ''}: "${p.text.replace(/\s+/g, ' ').slice(0, 140)}"`;
+  const top = ranked.slice(0, 5);
+  const bottom = ranked.length >= 8 ? ranked.slice(-3).reverse() : [];
+  const learnings = posts.length ? [
+    `Results from the last ${days} days on Buffer (${posts.length} posts with data):`,
+    'Best:', ...top.map(line),
+    ...(bottom.length ? ['Weakest:', ...bottom.map(line)] : []),
+    platforms.length ? `Average engagement by platform: ${platforms.map(p => `${p.label} ${p.rate}% (${p.posts} post${p.posts === 1 ? '' : 's'})`).join(', ')}.` : '',
+    bestHour ? `Best posting hour so far: around ${String(bestHour.hour).padStart(2, '0')}:00 (${bestHour.rate}% across ${bestHour.posts} posts).` : '',
+  ].filter(Boolean).join('\n') : '';
+  return { days, tz, updatedAt: new Date().toISOString(), count: posts.length, sent: raw.length, posts: ranked, platforms, bestHour, learnings };
 }
 
 function bufferInput(post, channel) {

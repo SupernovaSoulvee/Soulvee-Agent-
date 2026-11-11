@@ -298,6 +298,18 @@
     },
     aiOffReason: () => OFF[health && health.reason] || OFF.no_key,
     aiTest: () => api('POST', '/api/ai-test'),
+    health: () => api('GET', '/api/health'),
+    images: {
+      generate: body => api('POST', '/api/images/generate', body),
+    },
+    autopilot: {
+      status: () => api('GET', '/api/autopilot'),
+      save: config => api('PUT', '/api/autopilot', config),
+      context: context => api('POST', '/api/autopilot/context', context),
+      run: () => api('POST', '/api/autopilot/run'),
+      inbox: () => api('GET', '/api/autopilot/inbox'),
+      ack: ids => api('POST', '/api/autopilot/inbox/ack', { ids }),
+    },
     social: {
       status: () => api('GET', '/api/social/status'),
       channels: refresh => api('GET', '/api/social/channels' + (refresh ? '?refresh=1' : '')),
@@ -305,6 +317,7 @@
       jobs: ids => api('GET', '/api/social/jobs?ids=' + encodeURIComponent(ids.join(','))),
       cancel: id => api('POST', '/api/social/jobs/' + encodeURIComponent(id) + '/cancel'),
       testWebhook: () => api('POST', '/api/social/test-webhook'),
+      insights: (tz, refresh) => api('GET', '/api/social/insights?tz=' + encodeURIComponent(tz || '') + (refresh ? '&refresh=1' : '')),
     },
   };
 

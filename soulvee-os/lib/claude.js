@@ -78,6 +78,31 @@ async function stream(api, res, body) {
   res.end();
 }
 
+// One structured-output request run on the server (autopilot): the reply is JSON matching `schema`.
+// Streamed internally, so a long answer can't hit an HTTP timeout.
+async function generate(api, opts) {
+  if (!api.client) throw coded('no_key', 'AI is off: set ANTHROPIC_API_KEY on the server.');
+  const request = params(api, { messages: [{ role: 'user', content: opts.prompt }], format: opts.schema, effort: opts.effort, system: opts.system });
+  const message = await api.client.beta.messages.stream(request).finalMessage().catch(err => { throw coded(explain(err, api.model).code, explain(err, api.model).message); });
+  if (message.stop_reason === 'refusal') throw coded('refusal', 'Claude declined this request.');
+  if (message.stop_reason === 'max_tokens') throw coded('max_tokens', 'The answer got cut off.');
+  const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('');
+  const parsed = safeParse(text);
+  if (!parsed) throw coded('bad_json', "The AI's answer couldn't be read.");
+  return parsed;
+}
+
+function safeParse(text) {
+  try { return JSON.parse(text); }
+  catch { return null; }
+}
+
+function coded(code, message) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
 // One short real request, so the owner can confirm the key and model work.
 async function test(api) {
   const message = await api.client.beta.messages.create({
@@ -107,4 +132,4 @@ function explain(err, model) {
   return { code: 'server', message: 'Something went wrong on the Soulvee OS server. Try again.' };
 }
 
-module.exports = { create, check, stream, test, explain };
+module.exports = { create, check, stream, test, explain, generate };

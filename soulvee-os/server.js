@@ -9,6 +9,8 @@ loadEnv(path.join(__dirname, '.env'));
 
 const claude = require('./lib/claude');
 const social = require('./lib/social');
+const imaging = require('./lib/images');
+const autopilot = require('./lib/autopilot');
 
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -19,6 +21,8 @@ const MAX_BODY = 2 * 1024 * 1024;
 
 const ai = claude.create(process.env);
 const posts = social.create(process.env, DATA_DIR);
+const images = imaging.create(process.env, DATA_DIR);
+const pilot = autopilot.create({ env: process.env, dir: DATA_DIR, ai, social: posts, images });
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -110,7 +114,41 @@ async function handleSocial(req, res, url) {
   const cancel = route.match(/^jobs\/([\w-]+)\/cancel$/);
   if (cancel && req.method === 'POST') return reply(Promise.resolve().then(() => ({ job: posts.cancel(cancel[1]) })));
   if (route === 'test-webhook' && req.method === 'POST') return reply(posts.testHook());
+  if (route === 'insights' && req.method === 'GET') return reply(posts.insights({ days: url.searchParams.get('days'), tz: url.searchParams.get('tz') || undefined, refresh: url.searchParams.get('refresh') === '1' }));
   return send(res, 404, { error: { code: 'not_found', message: 'Not found' } });
+}
+
+async function handleImages(req, res) {
+  if (!authorised(req)) return send(res, 401, { error: { code: 'locked', message: 'Images are locked: open the app once with ?token=YOUR_TOKEN.' } });
+  const body = await readJson(req);
+  if (!body) return send(res, 400, { error: { code: 'bad_request', message: 'Bad request body' } });
+  const media = await images.generate(body).catch(err => ({ error: err }));
+  if (media.error) return send(res, media.error.code ? 400 : 500, { error: { code: media.error.code || 'server', message: media.error.message } });
+  return send(res, 200, { media });
+}
+
+async function handleAutopilot(req, res, url) {
+  const route = url.pathname.slice('/api/autopilot'.length);
+  if (route === '' && req.method === 'GET') return send(res, 200, canPublish(req) ? { allowed: true, ...pilot.status() } : { allowed: false });
+  if (!canPublish(req)) return send(res, 403, { error: { code: 'locked', message: ACCESS_TOKEN ? 'Autopilot is locked: open the app once with ?token=YOUR_TOKEN.' : 'Autopilot can only be changed from the computer running Soulvee OS until SOULVEE_ACCESS_TOKEN is set.' } });
+  const reply = fn => Promise.resolve().then(fn).then(data => send(res, 200, data), err => send(res, err.code ? 400 : 500, { error: { code: err.code || 'server', message: err.message } }));
+  if (route === '' && req.method === 'PUT') { const body = await readJson(req); return reply(() => pilot.update(body)); }
+  if (route === '/context' && req.method === 'POST') { const body = await readJson(req); return reply(() => pilot.setContext(body)); }
+  if (route === '/run' && req.method === 'POST') return reply(() => pilot.runNow());
+  if (route === '/inbox' && req.method === 'GET') return send(res, 200, { drafts: pilot.take() });
+  if (route === '/inbox/ack' && req.method === 'POST') { const body = await readJson(req); return reply(() => pilot.ack(Array.isArray(body && body.ids) ? body.ids.map(String) : [])); }
+  return send(res, 404, { error: { code: 'not_found', message: 'Not found' } });
+}
+
+// Images made for posts, served publicly so Buffer and the networks can fetch them.
+function serveMedia(req, res, name) {
+  const file = images.file(name);
+  if (!file) return send(res, 404, { error: 'Not found' });
+  fs.readFile(file, (err, data) => {
+    if (err) return send(res, 404, { error: 'Not found' });
+    res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'public, max-age=31536000, immutable' });
+    res.end(data);
+  });
 }
 
 function serveStatic(req, res, pathname) {
@@ -148,11 +186,14 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === '/api/health') {
       const reason = aiBlock(req, url);
-      return send(res, 200, { ok: true, ai: !reason, reason: reason || undefined, model: ai.model, social: posts.status() });
+      return send(res, 200, { ok: true, ai: !reason, reason: reason || undefined, model: ai.model, social: posts.status(), images: images.status() });
     }
     if (url.pathname === '/api/claude' && req.method === 'POST') return await handleClaude(req, res);
     if (url.pathname === '/api/ai-test' && req.method === 'POST') return await handleAiTest(req, res);
     if (url.pathname.startsWith('/api/social/')) return await handleSocial(req, res, url);
+    if (url.pathname === '/api/images/generate' && req.method === 'POST') return await handleImages(req, res);
+    if (url.pathname === '/api/autopilot' || url.pathname.startsWith('/api/autopilot/')) return await handleAutopilot(req, res, url);
+    if (url.pathname.startsWith('/media/') && (req.method === 'GET' || req.method === 'HEAD')) return serveMedia(req, res, url.pathname.slice('/media/'.length));
     if (url.pathname.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Method not allowed' });
     serveStatic(req, res, url.pathname);
@@ -164,10 +205,15 @@ const server = http.createServer(async (req, res) => {
 });
 
 posts.start();
+pilot.start();
 server.listen(PORT, HOST, () => {
   const s = posts.status();
   console.log(`Soulvee OS running on http://localhost:${PORT}`);
   console.log(ai.client ? `AI on (model ${ai.model})${ACCESS_TOKEN ? ', token-protected' : ''}` : 'AI off: set ANTHROPIC_API_KEY to enable the agent, content generator, offer builder and lessons');
   console.log(`Publishing: ${[s.buffer && 'Buffer', s.webhook && `webhook${s.signed ? ' (signed)' : ''}`].filter(Boolean).join(' + ') || 'off (copy and post by hand)'}`);
+  const img = images.status();
+  console.log(img.ready ? `Images on (${img.model}, hosted ${img.hosting === 'cloudinary' ? 'on Cloudinary' : img.hosting === 'server' ? 'at PUBLIC_URL/media' : 'on this server only'})` : 'Images off: set OPENAI_API_KEY to make post images');
+  const ap = pilot.status();
+  if (ap.enabled) console.log(`Autopilot on: next run ${ap.nextRun}`);
   if ((s.buffer || s.webhook) && !ACCESS_TOKEN) console.log('Publishing is limited to this computer. Set SOULVEE_ACCESS_TOKEN before hosting Soulvee OS publicly.');
 });
