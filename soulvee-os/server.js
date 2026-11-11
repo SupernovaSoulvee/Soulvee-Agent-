@@ -14,7 +14,7 @@ const autopilot = require('./lib/autopilot');
 
 const PORT = Number(process.env.PORT) || 8787;
 const HOST = process.env.HOST || '0.0.0.0';
-const ACCESS_TOKEN = process.env.SOULVEE_ACCESS_TOKEN || ''; // protects AI and publishing when hosted publicly
+const ACCESS_TOKEN = process.env.SOULVEE_ACCESS_TOKEN || ''; // lets other devices use AI, images and publishing
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_DIR = path.resolve(process.env.SOULVEE_DATA_DIR || path.join(__dirname, 'data'));
 const MAX_BODY = 2 * 1024 * 1024;
@@ -59,33 +59,42 @@ async function readJson(req) {
   catch { return null; }
 }
 
-function authorised(req) {
-  if (!ACCESS_TOKEN) return true;
+function hasToken(req) {
   const cookie = req.headers.cookie || '';
   return req.headers['x-soulvee-token'] === ACCESS_TOKEN || cookie.split(/;\s*/).includes('soulvee_token=' + encodeURIComponent(ACCESS_TOKEN));
 }
 
-function loopback(req) {
+// A visit from the computer running Soulvee OS. A reverse proxy or tunnel on this computer
+// (nginx, Caddy, Cloudflare Tunnel, ngrok) also connects from 127.0.0.1, so forwarded requests count as remote.
+function local(req) {
   const ip = req.socket.remoteAddress || '';
-  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  const h = req.headers;
+  return (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') && !h['x-forwarded-for'] && !h.forwarded && !h['x-real-ip'];
 }
 
-// Publishing reaches your real social accounts, so without SOULVEE_ACCESS_TOKEN it is only
-// allowed from this computer. Hosted publicly, set the token.
-function canPublish(req) {
-  return ACCESS_TOKEN ? authorised(req) : loopback(req);
+// AI and images spend your API credit, and publishing reaches your real accounts. With
+// SOULVEE_ACCESS_TOKEN set they need the token; without it they only work on this computer.
+function allowed(req) {
+  return ACCESS_TOKEN ? hasToken(req) : local(req);
+}
+
+// The message for a request that allowed() turned away. `feature` is e.g. "AI is" or "Images are".
+function locked(feature) {
+  return ACCESS_TOKEN
+    ? `${feature} locked: open the app once with ?token=YOUR_TOKEN.`
+    : `${feature} only available on the computer running Soulvee OS. To use it from other devices, set SOULVEE_ACCESS_TOKEN on the server.`;
 }
 
 // Why AI is unavailable for this request, or '' when it can be used.
 function aiBlock(req, url) {
   if (!ai.client) return 'no_key';
-  if (!authorised(req) && url.searchParams.get('token') !== ACCESS_TOKEN) return 'locked';
-  return '';
+  if (allowed(req) || (ACCESS_TOKEN && url.searchParams.get('token') === ACCESS_TOKEN)) return '';
+  return ACCESS_TOKEN ? 'locked' : 'local_only';
 }
 
 async function handleClaude(req, res) {
   if (!ai.client) return send(res, 503, { error: { code: 'no_key', message: 'AI is off: set ANTHROPIC_API_KEY on the server.' } });
-  if (!authorised(req)) return send(res, 401, { error: { code: 'locked', message: 'AI is locked: open the app once with ?token=YOUR_TOKEN.' } });
+  if (!allowed(req)) return send(res, 401, { error: { code: 'locked', message: locked('AI is') } });
   const body = await readJson(req);
   const problem = claude.check(body);
   if (problem) return send(res, 400, { error: { code: 'bad_request', message: problem } });
@@ -94,15 +103,15 @@ async function handleClaude(req, res) {
 
 async function handleAiTest(req, res) {
   if (!ai.client) return send(res, 200, { ok: false, code: 'no_key', message: 'AI is off: set ANTHROPIC_API_KEY on the server, then restart it.' });
-  if (!authorised(req)) return send(res, 401, { ok: false, code: 'locked', message: 'AI is locked: open the app once with ?token=YOUR_TOKEN.' });
+  if (!allowed(req)) return send(res, 401, { ok: false, code: 'locked', message: locked('AI is') });
   const out = await claude.test(ai).catch(err => ({ ok: false, ...claude.explain(err, ai.model) }));
   return send(res, 200, out);
 }
 
 async function handleSocial(req, res, url) {
   const route = url.pathname.slice('/api/social/'.length);
-  if (route === 'status' && req.method === 'GET') return send(res, 200, { ...posts.status(), allowed: canPublish(req) });
-  if (!canPublish(req)) return send(res, 403, { error: { code: 'locked', message: ACCESS_TOKEN ? 'Publishing is locked: open the app once with ?token=YOUR_TOKEN.' : 'Publishing only works from the computer running Soulvee OS until SOULVEE_ACCESS_TOKEN is set.' } });
+  if (route === 'status' && req.method === 'GET') return send(res, 200, { ...posts.status(), allowed: allowed(req) });
+  if (!allowed(req)) return send(res, 403, { error: { code: 'locked', message: locked('Publishing is') } });
   const reply = promise => promise.then(data => send(res, 200, data), err => send(res, err.code ? 400 : 500, { error: { code: err.code || 'server', message: err.message } }));
   if (route === 'channels' && req.method === 'GET') return reply(posts.channels(url.searchParams.get('refresh') === '1').then(channels => ({ channels })));
   if (route === 'publish' && req.method === 'POST') {
@@ -119,7 +128,7 @@ async function handleSocial(req, res, url) {
 }
 
 async function handleImages(req, res) {
-  if (!authorised(req)) return send(res, 401, { error: { code: 'locked', message: 'Images are locked: open the app once with ?token=YOUR_TOKEN.' } });
+  if (!allowed(req)) return send(res, 401, { error: { code: 'locked', message: locked('Images are') } });
   const body = await readJson(req);
   if (!body) return send(res, 400, { error: { code: 'bad_request', message: 'Bad request body' } });
   const media = await images.generate(body).catch(err => ({ error: err }));
@@ -129,8 +138,8 @@ async function handleImages(req, res) {
 
 async function handleAutopilot(req, res, url) {
   const route = url.pathname.slice('/api/autopilot'.length);
-  if (route === '' && req.method === 'GET') return send(res, 200, canPublish(req) ? { allowed: true, ...pilot.status() } : { allowed: false });
-  if (!canPublish(req)) return send(res, 403, { error: { code: 'locked', message: ACCESS_TOKEN ? 'Autopilot is locked: open the app once with ?token=YOUR_TOKEN.' : 'Autopilot can only be changed from the computer running Soulvee OS until SOULVEE_ACCESS_TOKEN is set.' } });
+  if (route === '' && req.method === 'GET') return send(res, 200, allowed(req) ? { allowed: true, ...pilot.status() } : { allowed: false });
+  if (!allowed(req)) return send(res, 403, { error: { code: 'locked', message: locked('Autopilot is') } });
   const reply = fn => Promise.resolve().then(fn).then(data => send(res, 200, data), err => send(res, err.code ? 400 : 500, { error: { code: err.code || 'server', message: err.message } }));
   if (route === '' && req.method === 'PUT') { const body = await readJson(req); return reply(() => pilot.update(body)); }
   if (route === '/context' && req.method === 'POST') { const body = await readJson(req); return reply(() => pilot.setContext(body)); }
@@ -215,5 +224,5 @@ server.listen(PORT, HOST, () => {
   console.log(img.ready ? `Images on (${img.model}, hosted ${img.hosting === 'cloudinary' ? 'on Cloudinary' : img.hosting === 'server' ? 'at PUBLIC_URL/media' : 'on this server only'})` : 'Images off: set OPENAI_API_KEY to make post images');
   const ap = pilot.status();
   if (ap.enabled) console.log(`Autopilot on: next run ${ap.nextRun}`);
-  if ((s.buffer || s.webhook) && !ACCESS_TOKEN) console.log('Publishing is limited to this computer. Set SOULVEE_ACCESS_TOKEN before hosting Soulvee OS publicly.');
+  if (!ACCESS_TOKEN && (ai.client || img.ready || s.buffer || s.webhook)) console.log('AI, images and publishing only work on this computer. Set SOULVEE_ACCESS_TOKEN to use them from other devices or a public host.');
 });

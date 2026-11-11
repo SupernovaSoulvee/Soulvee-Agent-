@@ -115,6 +115,7 @@
   const OFF = {
     no_key: 'AI is off. Set ANTHROPIC_API_KEY on the Soulvee OS server (see README), then restart it.',
     locked: 'AI is locked on this device. Open the app once with ?token=YOUR_TOKEN to unlock it.',
+    local_only: 'AI only works on the computer running Soulvee OS. To use it on this device, set SOULVEE_ACCESS_TOKEN on the server, restart it, then open the app once with ?token=YOUR_TOKEN.',
     offline: "AI needs the Soulvee OS server, and it can't be reached right now. Check your connection, then reload.",
     server: "AI is unavailable: the Soulvee OS server didn't answer. Reload to try again.",
   };

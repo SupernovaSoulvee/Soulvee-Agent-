@@ -117,13 +117,19 @@ const PERIODS = {
 };
 const inPeriod = (d, p) => !!d && d >= PERIODS[p].from && d <= PERIODS[p].to;
 
+const vatRateNow = settings => settings.vatRate === '' || settings.vatRate == null ? 7.5 : num(settings.vatRate);
+// Each invoice keeps the VAT rate it was saved with, so changing the rate in Setup leaves issued
+// invoices alone. Invoices saved before rates were kept use today's rate.
+const vatRateOf = (inv, settings) => inv.vatRate === '' || inv.vatRate == null ? vatRateNow(settings) : num(inv.vatRate);
 function invTotals(inv, settings) {
   const sub = (inv.items || []).reduce((a, it) => a + num(it.amount), 0);
-  const rate = settings.vatRate === '' || settings.vatRate == null ? 7.5 : num(settings.vatRate);
-  const vat = inv.vat ? sub * rate / 100 : 0;
+  const vat = inv.vat ? sub * vatRateOf(inv, settings) / 100 : 0;
   const wht = sub * num(inv.wht) / 100;
   return { sub, vat, total: sub + vat, wht, net: sub + vat - wht };
 }
+// What the client still owes: the amount payable less any part payments already logged.
+const invBalance = (inv, settings) => inv.status === 'paid' ? 0 : Math.max(0, invTotals(inv, settings).net - num(inv.paidNgn));
+const partPaid = inv => inv.status !== 'paid' && num(inv.paidNgn) > 0;
 const invStatus = inv => (inv.status === 'sent' && inv.dueDate && inv.dueDate < localDate()) ? 'overdue' : (inv.status || 'draft');
 const clientCode = c => (String(c || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8) || 'CLIENT');
 const invNumber = (client, seq) => `INV-SMC-${clientCode(client)}-${String(seq).padStart(3, '0')}`;
@@ -135,7 +141,7 @@ function computeSnapshot(data, settings, period = 'h2') {
   const expenses = exp.reduce((a, l) => a + num(l.ngn), 0);
   const byBrand = BRANDS.map(b => ({ id: b.id, name: b.short, income: inc.filter(l => l.brand === b.id).reduce((a, l) => a + num(l.ngn), 0), expenses: exp.filter(l => l.brand === b.id).reduce((a, l) => a + num(l.ngn), 0) }));
   const openInv = data.invoices.filter(i => ['sent', 'overdue'].includes(invStatus(i)));
-  const outstanding = openInv.reduce((a, i) => a + invTotals(i, settings).net, 0);
+  const outstanding = openInv.reduce((a, i) => a + invBalance(i, settings), 0);
   const overdue = data.invoices.filter(i => invStatus(i) === 'overdue');
   const openDeals = data.deals.filter(d => !['won', 'lost'].includes(d.stage));
   const pipeline = openDeals.reduce((a, d) => a + num(d.value), 0);
@@ -385,7 +391,7 @@ function CommandView({ store, caps, go, openDeal, openInvoice }) {
       <${Card}>
         <div className="flex items-center justify-between mb-3"><p className="font-semibold text-sm">Next money moves</p><${Btn} small kind="ghost" onClick=${() => go('assistant')}>Ask the agent</${Btn}></div>
         <div className="space-y-2">
-          ${s.overdue.map(i => html`<button key=${i.id} onClick=${() => go('money')} className="w-full text-left p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-sm"><span className="font-medium">Chase ${i.number}</span> · ${i.client} · ${ngn(invTotals(i, settings).net)} <span className=${muted}>was due ${fmtDate(i.dueDate)}</span></button>`)}
+          ${s.overdue.map(i => html`<button key=${i.id} onClick=${() => go('money')} className="w-full text-left p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-sm"><span className="font-medium">Chase ${i.number}</span> · ${i.client} · ${ngn(invBalance(i, settings))} <span className=${muted}>was due ${fmtDate(i.dueDate)}</span></button>`)}
           ${followUps.map(d => html`<button key=${d.id} onClick=${() => openDeal(d)} className="w-full text-left p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-sm"><span className="font-medium">${d.nextStep ? 'Due: ' + d.nextStep : 'Set a next step'}</span> · ${d.client} <span className=${muted}>${ngn(d.value)}</span></button>`)}
           ${unpriced.map(o => html`<button key=${o.id} onClick=${() => go('skills')} className="w-full text-left p-3 rounded-xl bg-violet-50 dark:bg-violet-500/10 text-sm"><span className="font-medium">Price it:</span> ${o.name} <span className=${muted}>· ${brandOf(o.brand).short}</span></button>`)}
           ${!s.overdue.length && !followUps.length && !unpriced.length && html`<${Empty} title="Nothing urgent">Every deal has a next step and every offer has a price.<//>`}
@@ -1345,9 +1351,10 @@ function printInvoice(inv, settings) {
     <table><thead><tr><th>Description</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="totals">
       <div><span class="muted">Subtotal</span><span>${esc(ngn(t.sub))}</span></div>
-      <div><span class="muted">VAT (${inv.vat ? esc(settings.vatRate) : 0}%)</span><span>${esc(ngn(t.vat))}</span></div>
+      <div><span class="muted">VAT (${inv.vat ? esc(vatRateOf(inv, settings)) : 0}%)</span><span>${esc(ngn(t.vat))}</span></div>
       <div class="grand"><span>Total</span><span>${esc(ngn(t.total))}</span></div>
       ${t.wht > 0 ? `<div><span class="muted">Less WHT (${esc(inv.wht)}%)</span><span>−${esc(ngn(t.wht))}</span></div><div><b>Amount payable</b><b>${esc(ngn(t.net))}</b></div>` : ''}
+      ${partPaid(inv) ? `<div><span class="muted">Paid to date</span><span>−${esc(ngn(inv.paidNgn))}</span></div><div class="grand"><span>Balance due</span><span>${esc(ngn(invBalance(inv, settings)))}</span></div>` : ''}
     </div>
     <div class="box"><b>Payment</b><br>${esc(c.payment)}${inv.notes ? `<br><br><b>Notes</b><br>${esc(inv.notes)}` : ''}</div>
     <p class="foot muted">Thank you for your business.${t.wht > 0 ? ' Please send the WHT credit note for the amount deducted.' : ''}</p>
@@ -1366,7 +1373,7 @@ function InvoiceModal({ invoice, deal, store, onClose, toast }) {
   const [f, setF] = useState(() => invoice && invoice.id ? { ...invoice, items: (invoice.items && invoice.items.length ? invoice.items : [{ desc: '', amount: '' }]).map(i => ({ ...i })) } : {
     client: deal ? deal.client : '', clientEmail: deal ? (deal.email || '') : '', brand: deal ? deal.brand : 'smc',
     items: [{ desc: deal ? (offer ? offer.name : 'Services') : '', amount: deal ? String(deal.value || '') : '' }],
-    vat: true, wht: whtStart, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft',
+    vat: true, vatRate: vatRateNow(settings), wht: whtStart, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft',
     offerId: deal ? (deal.offerId || '') : '', dealId: deal ? deal.id : '',
   });
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
@@ -1374,7 +1381,7 @@ function InvoiceModal({ invoice, deal, store, onClose, toast }) {
   const t = invTotals(f, settings);
   const number = f.number || invNumber(f.client, settings.invoiceSeq);
   const save = async () => {
-    const doc = { ...f, number, items: f.items.filter(i => i.desc || num(i.amount)).map(i => ({ desc: i.desc, amount: num(i.amount) })), wht: num(f.wht) };
+    const doc = { ...f, number, items: f.items.filter(i => i.desc || num(i.amount)).map(i => ({ desc: i.desc, amount: num(i.amount) })), wht: num(f.wht), vatRate: vatRateOf(f, settings) };
     if (invoice && invoice.id) await update('invoices', invoice.id, doc);
     else {
       await add('invoices', doc);
@@ -1397,7 +1404,7 @@ function InvoiceModal({ invoice, deal, store, onClose, toast }) {
       <div className="space-y-2">${f.items.map((it, i) => html`<div key=${i} className="flex gap-2"><input className=${inputCls} placeholder="Description" value=${it.desc} onChange=${e => setItem(i, 'desc', e.target.value)} /><input className=${inputCls + ' !w-36'} inputMode="numeric" placeholder="Amount" value=${it.amount} onChange=${e => setItem(i, 'amount', e.target.value)} />${f.items.length > 1 && html`<button className="text-rose-500 text-xs px-1" onClick=${() => set('items', f.items.filter((_, j) => j !== i))}>✕</button>`}</div>`)}</div>
     </div>
     <div className="grid sm:grid-cols-2 gap-3 mt-4">
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked=${!!f.vat} onChange=${e => set('vat', e.target.checked)} /> Charge VAT (${settings.vatRate}%)</label>
+      <div className="text-sm"><label className="flex items-center gap-2"><input type="checkbox" checked=${!!f.vat} onChange=${e => set('vat', e.target.checked)} /> Charge VAT (${vatRateOf(f, settings)}%)</label>${vatRateOf(f, settings) !== vatRateNow(settings) && html`<button className="mt-1 text-xs text-violet-500 font-medium" onClick=${() => set('vatRate', vatRateNow(settings))}>Use today's rate (${vatRateNow(settings)}%)</button>`}</div>
       <${Field} label="WHT the client deducts"><${Select} value=${String(f.wht)} onChange=${v => set('wht', v)} options=${[{ v: '0', l: 'None' }, { v: '5', l: '5%' }, { v: '10', l: '10%' }]} /><//>
       <${Field} label="Notes on invoice" className="sm:col-span-2"><${Input} value=${f.notes} onChange=${e => set('notes', e.target.value)} placeholder="e.g. 70% deposit, 30% on delivery" /><//>
     </div>
@@ -1416,8 +1423,9 @@ function invoiceText(inv, settings) {
     c.name, `${c.bn} · ${c.address}`, `${c.phone} · ${c.email}`, '',
     `INVOICE ${inv.number}`, `Issued: ${fmtDate(inv.issueDate)}   Due: ${fmtDate(inv.dueDate)}`, `Bill to: ${inv.client}${inv.clientEmail ? ' <' + inv.clientEmail + '>' : ''}`, '',
     ...(inv.items || []).map(i => `• ${i.desc} — ${ngn(i.amount)}`), '',
-    `Subtotal: ${ngn(t.sub)}`, `VAT (${inv.vat ? settings.vatRate : 0}%): ${ngn(t.vat)}`, `TOTAL: ${ngn(t.total)}`,
-    ...(t.wht > 0 ? [`WHT (${inv.wht}%) deducted by client: ${ngn(t.wht)} — please send the credit note`, `Amount payable: ${ngn(t.net)}`] : []), '',
+    `Subtotal: ${ngn(t.sub)}`, `VAT (${inv.vat ? vatRateOf(inv, settings) : 0}%): ${ngn(t.vat)}`, `TOTAL: ${ngn(t.total)}`,
+    ...(t.wht > 0 ? [`WHT (${inv.wht}%) deducted by client: ${ngn(t.wht)} — please send the credit note`, `Amount payable: ${ngn(t.net)}`] : []),
+    ...(partPaid(inv) ? [`Paid to date: ${ngn(inv.paidNgn)}`, `BALANCE DUE: ${ngn(invBalance(inv, settings))}`] : []), '',
     `Payment: ${c.payment}`, ...(inv.notes ? [`Notes: ${inv.notes}`] : []), 'Thank you for your business.',
   ].join('\n');
 }
@@ -1425,24 +1433,33 @@ function invoiceText(inv, settings) {
 function PaidModal({ inv, store, toast, onClose }) {
   const { settings, add, update } = store;
   const t = invTotals(inv, settings);
+  const already = num(inv.paidNgn);
+  const due = invBalance(inv, settings);
   const payText = String(settings.company.payment || '').toLowerCase();
-  const [f, setF] = useState({ date: localDate(), method: METHODS.find(m => payText.includes(m.toLowerCase())) || 'Moniepoint', currency: 'NGN', amount: String(Math.round(t.net)), fx: '' });
+  const [f, setF] = useState({ date: localDate(), method: METHODS.find(m => payText.includes(m.toLowerCase())) || 'Moniepoint', currency: 'NGN', amount: String(Math.round(due)), fx: '' });
   const [touched, setTouched] = useState(false);
+  const [full, setFull] = useState(null); // null until "Paid in full" is ticked or unticked by hand
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
-  // Until the amount is edited by hand, keep it equal to the invoice total in the chosen currency.
+  // Until the amount is edited by hand, keep it equal to the balance due in the chosen currency.
   const setCurrency = v => setF(p => {
     if (touched) return { ...p, currency: v };
     const r = v === 'NGN' ? 1 : num(settings.fx[v]);
-    return { ...p, currency: v, fx: '', amount: r ? String(Math.round(t.net / r * 100) / 100) : '' };
+    return { ...p, currency: v, fx: '', amount: r ? String(Math.round(due / r * 100) / 100) : '' };
   });
   const rate = f.currency === 'NGN' ? 1 : (num(f.fx) || num(settings.fx[f.currency]));
   const ngnVal = num(f.amount) * rate;
+  // Less than the balance is a part payment and the invoice stays open for the rest, unless
+  // "Paid in full" is ticked (for a discount or an exchange-rate difference).
+  const settles = full === null ? (!touched || ngnVal >= due - 1) : full;
+  const left = Math.max(0, due - ngnVal);
   const save = async () => {
-    await add('ledger', { type: 'income', brand: inv.brand, amount: num(f.amount), currency: f.currency, fx: rate, ngn: ngnVal, method: f.method, date: f.date, note: `${inv.number} — ${inv.client}`, invoiceId: inv.id, offerId: inv.offerId || '' });
-    await update('invoices', inv.id, { status: 'paid', paidDate: f.date, paidNgn: ngnVal });
-    toast(`${inv.number} marked paid · ${ngn(ngnVal)} logged`); onClose();
+    const paidNgn = already + ngnVal;
+    if (ngnVal > 0) await add('ledger', { type: 'income', brand: inv.brand, amount: num(f.amount), currency: f.currency, fx: rate, ngn: ngnVal, method: f.method, date: f.date, note: `${inv.number} — ${inv.client}`, invoiceId: inv.id, offerId: inv.offerId || '' });
+    await update('invoices', inv.id, settles ? { status: 'paid', paidDate: f.date, paidNgn } : { status: inv.status === 'draft' ? 'sent' : inv.status, paidNgn });
+    toast(settles ? `${inv.number} marked paid${ngnVal > 0 ? ` · ${ngn(ngnVal)} logged` : ''}` : `${ngn(ngnVal)} logged · ${ngn(left)} still due on ${inv.number}`); onClose();
   };
-  return html`<${Modal} title=${'Record payment · ' + inv.number} onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} kind="good" disabled=${!(ngnVal > 0)} onClick=${save}>Mark paid</${Btn}>`}>
+  return html`<${Modal} title=${'Record payment · ' + inv.number} onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} kind="good" disabled=${!(ngnVal > 0) && !(settles && due < 1)} onClick=${save}>${settles ? 'Mark paid' : 'Record part payment'}</${Btn}>`}>
+    ${already > 0 && html`<p className="mb-3 text-sm">${ngn(already)} already received · <span className="font-semibold">${ngn(due)} still due</span></p>`}
     <div className="grid grid-cols-2 gap-3">
       <${Field} label="Date received"><${Input} type="date" value=${f.date} onChange=${e => set('date', e.target.value)} /><//>
       <${Field} label="Method"><${Select} value=${f.method} onChange=${v => set('method', v)} options=${METHODS} /><//>
@@ -1450,7 +1467,8 @@ function PaidModal({ inv, store, toast, onClose }) {
       <${Field} label="Amount received"><${Input} inputMode="decimal" value=${f.amount} onChange=${e => { setTouched(true); set('amount', e.target.value); }} /><//>
       ${f.currency !== 'NGN' && html`<${Field} label=${`Rate used (₦ per 1 ${f.currency})`} className="col-span-2" hint="Enter the rate you actually got — this is what converts it into NGN revenue."><${Input} inputMode="decimal" value=${f.fx || (num(settings.fx[f.currency]) || '')} onChange=${e => set('fx', e.target.value)} /><//>`}
     </div>
-    <p className="mt-4 text-sm">Logs <span className="font-bold">${ngn(ngnVal)}</span> to ${brandOf(inv.brand).short} revenue.${t.wht > 0 ? ` Remember to collect the ${ngn(t.wht)} WHT credit note.` : ''}</p>
+    <label className="mt-4 flex items-center gap-2 text-sm"><input type="checkbox" checked=${settles} onChange=${e => setFull(e.target.checked)} /> Paid in full (closes the invoice)</label>
+    <p className="mt-2 text-sm">Logs <span className="font-bold">${ngn(ngnVal)}</span> to ${brandOf(inv.brand).short} revenue.${settles ? (t.wht > 0 ? ` Remember to collect the ${ngn(t.wht)} WHT credit note.` : '') : ` The invoice stays open with ${ngn(left)} still due.`}</p>
   <//>`;
 }
 
@@ -1495,17 +1513,22 @@ function MoneyView({ store, toast, openInvoice }) {
   const allocBase = Math.max(0, s.net - vatCollected);
 
   const copy = async t => { try { await navigator.clipboard.writeText(t); toast('Copied'); } catch (e) { toast('Copy blocked — select the text and copy it manually'); } };
-  // Reverses "Mark paid": removes the payment from the ledger and reopens the invoice.
-  const unpay = async inv => {
-    const entries = data.ledger.filter(l => l.invoiceId === inv.id);
-    if (!confirm(`Undo the payment on ${inv.number}? It goes back to unpaid${entries.length ? ' and the payment is removed from the ledger' : ''}.`)) return;
-    for (const l of entries) await remove('ledger', l.id);
-    await update('invoices', inv.id, { status: 'sent', paidDate: '', paidNgn: 0 });
-    toast(`${inv.number} is unpaid again`);
+  // Reverses one payment: removes it from the ledger and reopens the invoice for what it covered.
+  const undoPayment = async (inv, entry) => {
+    const left = entry ? Math.max(0, num(inv.paidNgn) - num(entry.ngn)) : 0;
+    const msg = left > 0
+      ? `Undo the ${ngn(entry.ngn)} payment on ${inv.number}? It is removed from the ledger; the ${ngn(left)} received before it stays.`
+      : `Undo the payment on ${inv.number}? It goes back to unpaid${entry ? ' and the payment is removed from the ledger' : ''}.`;
+    if (!confirm(msg)) return;
+    if (entry) await remove('ledger', entry.id);
+    await update('invoices', inv.id, { status: inv.status === 'paid' ? 'sent' : inv.status, paidDate: '', paidNgn: left });
+    toast(left > 0 ? `Payment removed · ${ngn(invBalance({ ...inv, status: 'sent', paidNgn: left }, settings))} now due on ${inv.number}` : `${inv.number} is unpaid again`);
   };
+  // "Undo paid" on an invoice reverses its latest payment.
+  const unpay = inv => undoPayment(inv, data.ledger.filter(l => l.invoiceId === inv.id).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0]);
   const delEntry = async l => {
     const inv = l.invoiceId && data.invoices.find(i => i.id === l.invoiceId);
-    if (inv) return unpay(inv);
+    if (inv) return undoPayment(inv, l);
     if (!sure('this entry')) return;
     await remove('ledger', l.id);
     toast('Entry deleted');
@@ -1521,7 +1544,7 @@ function MoneyView({ store, toast, openInvoice }) {
         return html`<${Card} key=${inv.id}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0"><p className="font-semibold text-sm truncate">${inv.number}</p><p className=${'text-xs ' + muted}>${inv.client} · due ${fmtDate(inv.dueDate)}</p><div className="flex gap-1.5 mt-1"><${BrandChip} id=${inv.brand} /><${Pill} tone=${st === 'paid' ? 'green' : st === 'overdue' ? 'red' : st === 'sent' ? 'blue' : 'slate'}>${st}</${Pill}></div></div>
-            <div className="text-right shrink-0"><p className="font-bold">${ngn(t.total)}</p>${t.wht > 0 && html`<p className=${'text-[11px] ' + muted}>net ${ngn(t.net)}</p>`}${inv.vat && html`<p className=${'text-[11px] ' + muted}>incl. VAT ${ngn(t.vat)}</p>`}</div>
+            <div className="text-right shrink-0"><p className="font-bold">${ngn(t.total)}</p>${t.wht > 0 && html`<p className=${'text-[11px] ' + muted}>net ${ngn(t.net)}</p>`}${inv.vat && html`<p className=${'text-[11px] ' + muted}>incl. VAT ${ngn(t.vat)}</p>`}${partPaid(inv) && html`<p className="text-[11px] font-medium text-amber-700 dark:text-amber-300">${ngn(inv.paidNgn)} paid · ${ngn(invBalance(inv, settings))} due</p>`}</div>
           </div>
           <div className="flex gap-2 mt-3 flex-wrap">
             ${st === 'draft' && html`<${Btn} small onClick=${() => update('invoices', inv.id, { status: 'sent' })}>Mark sent</${Btn}>`}
@@ -1529,8 +1552,8 @@ function MoneyView({ store, toast, openInvoice }) {
             <${Btn} small kind="ghost" onClick=${() => { if (!printInvoice(inv, settings)) toast('Allow pop-ups for Soulvee OS to open the PDF'); }}>PDF</${Btn}>
             <${Btn} small kind="ghost" onClick=${() => setText(invoiceText(inv, settings))}>Invoice text</${Btn}>
             <${Btn} small kind="ghost" onClick=${() => openInvoice(inv)}>Edit</${Btn}>
-            ${st === 'paid' && html`<${Btn} small kind="ghost" onClick=${() => unpay(inv)}>Undo paid</${Btn}>`}
-            ${st !== 'paid' && html`<${Btn} small kind="danger" onClick=${() => sure(inv.number) && remove('invoices', inv.id)}>Delete</${Btn}>`}
+            ${(st === 'paid' || partPaid(inv)) && html`<${Btn} small kind="ghost" onClick=${() => unpay(inv)}>${st === 'paid' ? 'Undo paid' : 'Undo payment'}</${Btn}>`}
+            ${st !== 'paid' && !partPaid(inv) && html`<${Btn} small kind="danger" onClick=${() => sure(inv.number) && remove('invoices', inv.id)}>Delete</${Btn}>`}
           </div>
         <//>`;
       })}
@@ -1674,11 +1697,11 @@ function AssistantView({ store, caps, toast }) {
 
   const tools = [
     { name: 'get_revenue_snapshot', description: 'Collected revenue, costs, outstanding invoices, weighted pipeline and H2 target progress, all in NGN.', inputSchema: { type: 'object', properties: { period: { type: 'string', enum: ['h2', 'year', 'all'] } } },
-      execute: ({ period } = {}) => { const s = computeSnapshot(ref.current.data, ref.current.settings, period || 'h2'); return { ...s, overdue: s.overdue.map(i => ({ number: i.number, client: i.client, due: i.dueDate })) }; } },
+      execute: ({ period } = {}) => { const s = computeSnapshot(ref.current.data, ref.current.settings, period || 'h2'); return { ...s, overdue: s.overdue.map(i => ({ number: i.number, client: i.client, due: i.dueDate, balance: Math.round(invBalance(i, ref.current.settings)) })) }; } },
     { name: 'list_deals', description: 'Pipeline deals with client, brand, stage, value (NGN), next step and due date.', inputSchema: { type: 'object', properties: { stage: { type: 'string', description: 'lead, qualified, proposal, negotiation, won, lost, or open' } } },
       execute: ({ stage } = {}) => ref.current.data.deals.filter(d => !stage || (stage === 'open' ? !['won', 'lost'].includes(d.stage) : d.stage === stage)).slice(0, 40).map(d => ({ client: d.client, brand: brandOf(d.brand).name, stage: d.stage, value: d.value, nextStep: d.nextStep, nextDue: d.nextDue, source: d.source })) },
-    { name: 'list_invoices', description: 'Invoices with number, client, status (draft, sent, overdue, paid) and NGN totals.', inputSchema: { type: 'object', properties: {} },
-      execute: () => ref.current.data.invoices.slice(0, 40).map(i => { const t = invTotals(i, ref.current.settings); return { number: i.number, client: i.client, status: invStatus(i), total: t.total, net: t.net, due: i.dueDate }; }) },
+    { name: 'list_invoices', description: 'Invoices with number, client, status (draft, sent, overdue, paid), NGN totals, the amount received so far and the balance still owed.', inputSchema: { type: 'object', properties: {} },
+      execute: () => ref.current.data.invoices.slice(0, 40).map(i => { const t = invTotals(i, ref.current.settings); return { number: i.number, client: i.client, status: invStatus(i), total: t.total, net: t.net, received: Math.round(num(i.paidNgn)), balance: Math.round(invBalance(i, ref.current.settings)), due: i.dueDate }; }) },
     { name: 'list_offers', description: 'The offer catalogue: name, brand, status, model and price tiers in NGN.', inputSchema: { type: 'object', properties: { brand: { type: 'string', enum: BRANDS.map(b => b.id) } } },
       execute: ({ brand } = {}) => ref.current.data.offers.filter(o => !brand || o.brand === brand).map(o => ({ name: o.name, brand: brandOf(o.brand).name, status: o.status, model: o.model, tiers: (o.tiers || []).map(t => ({ name: t.name, price: t.price })) })) },
     { name: 'create_deal', description: 'Add a deal to the pipeline. Use only when Soulvee asks you to add or log a lead/deal.', inputSchema: { type: 'object', required: ['client', 'brand'], properties: { client: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, value: { type: 'number' }, stage: { type: 'string', enum: STAGES.map(s => s.id) }, nextStep: { type: 'string' }, source: { type: 'string' }, email: { type: 'string' } } },
@@ -1686,7 +1709,7 @@ function AssistantView({ store, caps, toast }) {
     { name: 'create_offer', description: 'Save a new offer to the catalogue as status "packaging". Use only when Soulvee asks to save or create an offer.', inputSchema: { type: 'object', required: ['name', 'brand'], properties: { name: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, pitch: { type: 'string' }, model: { type: 'string', enum: MODELS }, tiers: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, price: { type: 'number' }, deliverables: { type: 'array', items: { type: 'string' } } } } } } },
       execute: async a => { await ref.current.add('offers', { name: a.name, brand: a.brand, pitch: a.pitch || '', model: a.model || 'project', status: 'packaging', channels: [], firstMove: '', tiers: (a.tiers || []).map(t => ({ name: t.name || '', price: num(t.price), deliverables: t.deliverables || [], suggested: true })) }); setActs(x => [...x, `Saved offer: ${a.name}`]); return { ok: true }; } },
     { name: 'create_draft_invoice', description: 'Create a DRAFT invoice (never sent or marked paid). Use only when Soulvee asks for an invoice.', inputSchema: { type: 'object', required: ['client', 'brand', 'items'], properties: { client: { type: 'string' }, brand: { type: 'string', enum: BRANDS.map(b => b.id) }, vat: { type: 'boolean' }, items: { type: 'array', items: { type: 'object', properties: { desc: { type: 'string' }, amount: { type: 'number' } } } } } },
-      execute: async a => { const st = ref.current.latestSettings(); const number = invNumber(a.client, st.invoiceSeq); await ref.current.add('invoices', { number, client: a.client, clientEmail: '', brand: a.brand, items: (a.items || []).map(i => ({ desc: i.desc || '', amount: num(i.amount) })), vat: a.vat !== false, wht: 0, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft', offerId: '', dealId: '' }); await ref.current.saveSettings({ ...st, invoiceSeq: num(st.invoiceSeq) + 1 }); setActs(x => [...x, `Drafted invoice ${number}`]); return { ok: true, number }; } },
+      execute: async a => { const st = ref.current.latestSettings(); const number = invNumber(a.client, st.invoiceSeq); await ref.current.add('invoices', { number, client: a.client, clientEmail: '', brand: a.brand, items: (a.items || []).map(i => ({ desc: i.desc || '', amount: num(i.amount) })), vat: a.vat !== false, vatRate: vatRateNow(st), wht: 0, issueDate: localDate(), dueDate: addDays(localDate(), 14), notes: '', status: 'draft', offerId: '', dealId: '' }); await ref.current.saveSettings({ ...st, invoiceSeq: num(st.invoiceSeq) + 1 }); setActs(x => [...x, `Drafted invoice ${number}`]); return { ok: true, number }; } },
     { name: 'list_content', description: 'Social posts in the content plan: title, brand, platforms, status (idea, draft, approved, scheduled, posted, failed) and scheduled time.', inputSchema: { type: 'object', properties: { status: { type: 'string', enum: POST_STATUS } } },
       execute: ({ status } = {}) => ref.current.data.content.filter(p => !status || p.status === status).slice(0, 40).map(p => ({ title: p.title, brand: brandOf(p.brand).name, platforms: p.platforms, status: p.status, scheduledAt: p.scheduledAt || null, caption: String(p.text || '').slice(0, 280), results: p.metrics || null })) },
     { name: 'get_social_results', description: 'How recent posts performed on Buffer: average engagement by platform, the best posting hour and the top posts. Use it when Soulvee asks what is working, and before planning content.', inputSchema: { type: 'object', properties: {} },

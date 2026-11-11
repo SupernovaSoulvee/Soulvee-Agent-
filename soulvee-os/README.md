@@ -26,7 +26,7 @@ npm start                   # http://localhost:8787
 
 Without any keys the app still works. AI features stay off, and posts are copied and posted by hand.
 
-On a phone, open the URL and choose **Add to Home Screen** (or **Install app**) to use it like an app. After the first visit it also opens without a connection, as long as it's served over https or from localhost.
+On a phone, open the URL and choose **Add to Home Screen** (or **Install app**) to use it like an app. After the first visit it also opens without a connection, as long as it's served over https or from localhost. AI, images and publishing only work on the computer running Soulvee OS until you set `SOULVEE_ACCESS_TOKEN`; then open the app once on the phone with `?token=YOUR_TOKEN`.
 
 ## Settings (.env)
 
@@ -42,7 +42,7 @@ On a phone, open the URL and choose **Add to Home Screen** (or **Install app**) 
 | `SOULVEE_IMAGE_QUALITY` | `low`, `medium` (default) or `high`. Higher costs more per image. |
 | `CLOUDINARY_URL` | Hosts the images at permanent public links, which Buffer needs. Copy it from your Cloudinary dashboard (`cloudinary://key:secret@cloud`). |
 | `PUBLIC_URL` | Your server's public address. Without Cloudinary, images are served from `PUBLIC_URL/media/…` instead. |
-| `SOULVEE_ACCESS_TOKEN` | **Required before hosting publicly.** Locks AI and publishing; open the app once with `?token=YOUR_TOKEN`. |
+| `SOULVEE_ACCESS_TOKEN` | **Needed on a public host, in Docker, or to use AI, images and publishing from another device.** Without it they only work on the computer running Soulvee OS. Open the app once on each device with `?token=YOUR_TOKEN`. |
 | `SOULVEE_DATA_DIR` | Where the server keeps the webhook queue, autopilot settings and drafts, and any images it hosts. Default `./data`. |
 | `PORT` | Default `8787`. |
 
@@ -67,7 +67,7 @@ The Content tab has three ways to publish:
 
 Media must be a direct public link, such as Cloudinary or Cloudflare R2. Google Drive and Dropbox share links won't work.
 
-Publishing reaches your real accounts, so without `SOULVEE_ACCESS_TOKEN` it only works from the computer running Soulvee OS.
+Publishing reaches your real accounts, so without `SOULVEE_ACCESS_TOKEN` it only works on the computer running Soulvee OS. The same goes for AI and images, which spend your credit.
 
 The full guide, with the setup steps, platform rules and costs, is [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
 
@@ -87,10 +87,10 @@ The server keeps only what has to run while you're away, in `data/`: the webhook
 
 ## Hosting
 
-- **Docker**: `docker build -t soulvee-os . && docker run -p 8787:8787 -v soulvee-data:/app/data --env-file .env soulvee-os`. Your `.env` is never copied into the image.
+- **Docker**: `docker build -t soulvee-os . && docker run -p 8787:8787 -v soulvee-data:/app/data --env-file .env soulvee-os`. Your `.env` is never copied into the image. Set `SOULVEE_ACCESS_TOKEN` in it too: inside Docker every visit counts as another device, so AI, images and publishing need the token.
 - **Render / Railway / Fly.io**: deploy this folder as a Node service with build command `npm install` and start command `node server.js`, then set the variables above. If you use the webhook or the autopilot, give the service a persistent disk for `data/` and keep it running. Otherwise a redeploy wipes the queue and autopilot settings. Buffer on its own needs neither.
 
-Always set `SOULVEE_ACCESS_TOKEN` on a public host, so nobody else can spend your Claude credit or post to your accounts.
+On a public host, AI, images and publishing stay off until you set `SOULVEE_ACCESS_TOKEN`, so nobody else can spend your Claude credit or post to your accounts.
 
 ## AI says it's off?
 
@@ -98,6 +98,7 @@ The AI Agent tab says why:
 
 - **Set ANTHROPIC_API_KEY**: the server has no key. Add it to `.env` and restart.
 - **AI is locked on this device**: `SOULVEE_ACCESS_TOKEN` is set. Open the app once with `?token=YOUR_TOKEN`.
+- **AI only works on the computer running Soulvee OS**: you opened the app from another device, or through Docker, a proxy or a tunnel, and `SOULVEE_ACCESS_TOKEN` isn't set. Set it, restart the server, and open the app once with `?token=YOUR_TOKEN`.
 - **Claude rejected the API key**: the key is wrong or revoked. Replace it and restart.
 - **Can't be reached**: you're offline or the server isn't running.
 
