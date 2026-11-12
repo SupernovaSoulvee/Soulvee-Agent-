@@ -1034,7 +1034,7 @@ function ImportModal({ store, toast, onClose }) {
   <//>`;
 }
 
-function ContactPanel({ contact, index, store, caps, toast, onClose, onEdit, openDeal, openInvoice, openTask }) {
+function ContactPanel({ contact, index, store, caps, toast, onClose, onEdit, openDeal, openInvoice, openTask, openConversation }) {
   const { data, add, update, remove } = store;
   const c = data.contacts.find(x => x.id === contact.id) || contact;
   const s = index.stats.get(c.id) || index.empty;
@@ -1042,6 +1042,8 @@ function ContactPanel({ contact, index, store, caps, toast, onClose, onEdit, ope
   const [quick, setQuick] = useState({ title: '', due: addDays(localDate(), 2) });
   const [brief, setBrief] = useState('');
   const [busy, setBusy] = useState(false);
+  const [chats, setChats] = useState([]);
+  useEffect(() => { window.SoulveeOS.allowed().then(ok => (ok ? window.SoulveeOS.inbox.list() : { conversations: [] })).then(r => setChats(r.conversations.filter(x => contactForPeer([c], x)))).catch(() => {}); }, [c.id]);
   const events = timelineOf(s);
   const open = s.tasks.filter(t => !t.done).sort((a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999')));
   const stage = stageFor(c, s);
@@ -1124,6 +1126,10 @@ ${lines || '- nothing logged yet'}`, { effort: 'low' });
         </div>`)}</div>
         <div className="flex flex-wrap gap-2 mt-2"><input className=${inputCls + ' flex-1 min-w-[12rem]'} aria-label="New follow-up" value=${quick.title} onChange=${e => setQuick(p => ({ ...p, title: e.target.value }))} onKeyDown=${e => { if (e.key === 'Enter') addTask(); }} placeholder="Add a follow-up…" /><input type="date" aria-label="Follow-up date" className=${inputCls + ' !w-40 flex-none'} value=${quick.due} onChange=${e => setQuick(p => ({ ...p, due: e.target.value }))} /><${Btn} small onClick=${addTask} disabled=${!quick.title.trim()}>Add</${Btn}></div>
       </div>
+      ${chats.length > 0 && html`<div>
+        <p className="font-semibold text-sm mb-2">Conversations</p>
+        <div className="space-y-1.5">${chats.map(x => html`<button key=${x.key} onClick=${() => openConversation(x.key)} className="w-full text-left flex items-center gap-2 text-xs p-2 rounded-lg bg-slate-50 dark:bg-white/5"><${NetBadge} id=${x.provider} /><span className="flex-1 min-w-0 truncate">${x.lastDir === 'out' ? 'You: ' : ''}${x.lastText}</span><span className=${'shrink-0 ' + muted}>${x.unread ? x.unread + ' new · ' : ''}${ago(x.lastAt)}</span></button>`)}</div>
+      </div>`}
       <div>
         <p className="font-semibold text-sm mb-2">Log activity</p>
         <div className="flex flex-wrap gap-2"><select aria-label="Activity type" className=${inputCls + ' !w-32 flex-none'} value=${log.type} onChange=${e => setLog(p => ({ ...p, type: e.target.value }))}>${ACTIVITY.map(a => html`<option key=${a.id} value=${a.id}>${a.name}</option>`)}</select><input className=${inputCls + ' flex-1 min-w-[10rem]'} aria-label="What happened" value=${log.text} onChange=${e => setLog(p => ({ ...p, text: e.target.value }))} onKeyDown=${e => { if (e.key === 'Enter') logIt(); }} placeholder="e.g. Called — wants a quote for 12 Dec" /><${Btn} small onClick=${logIt} disabled=${!log.text.trim()}>Log</${Btn}></div>
@@ -1229,12 +1235,13 @@ function TasksView({ store, toast, index, openContact, editTask }) {
   </div>`;
 }
 
-function CRMView({ store, caps, toast, sub, setSub, openDeal, openInvoice }) {
+function CRMView({ store, caps, toast, sub, setSub, openDeal, openInvoice, openId, clearOpen, openConversation }) {
   const index = useMemo(() => crmIndex(store.data, store.settings), [store.data, store.settings]);
   const [viewing, setViewing] = useState(null);
   const [editing, setEditing] = useState(null);
   const [task, setTask] = useState(null);
   const [importing, setImporting] = useState(false);
+  useEffect(() => { if (!openId) return; const c = store.data.contacts.find(x => x.id === openId); if (c) { setSub('people'); setViewing(c); } clearOpen(); }, [openId]);
   const saveContact = async v => {
     if (editing && editing.id) await store.update('contacts', editing.id, v);
     else { const made = await store.add('contacts', v); setViewing(made); }
@@ -1252,10 +1259,349 @@ function CRMView({ store, caps, toast, sub, setSub, openDeal, openInvoice }) {
     ${sub === 'people' && html`<${PeopleView} store=${store} toast=${toast} index=${index} openContact=${setViewing} editContact=${setEditing} openImport=${() => setImporting(true)} />`}
     ${sub === 'pipeline' && html`<${PipelineView} store=${store} caps=${caps} toast=${toast} openDeal=${openDeal} openInvoice=${openInvoice} contactOf=${d => index.dealContact.get(d.id)} openContact=${setViewing} />`}
     ${sub === 'tasks' && html`<${TasksView} store=${store} toast=${toast} index=${index} openContact=${setViewing} editTask=${setTask} />`}
-    ${viewing && !editing && !task && html`<${ContactPanel} contact=${viewing} index=${index} store=${store} caps=${caps} toast=${toast} onClose=${() => setViewing(null)} onEdit=${setEditing} openDeal=${d => { setViewing(null); openDeal(d); }} openInvoice=${i => { setViewing(null); openInvoice(i); }} openTask=${setTask} />`}
+    ${viewing && !editing && !task && html`<${ContactPanel} contact=${viewing} index=${index} store=${store} caps=${caps} toast=${toast} onClose=${() => setViewing(null)} onEdit=${setEditing} openDeal=${d => { setViewing(null); openDeal(d); }} openInvoice=${i => { setViewing(null); openInvoice(i); }} openTask=${setTask} openConversation=${k => { setViewing(null); openConversation(k); }} />`}
     ${editing && html`<${ContactModal} contact=${editing} onClose=${() => setEditing(null)} onSave=${saveContact} />`}
     ${task && html`<${TaskModal} task=${task} contacts=${store.data.contacts} onClose=${() => setTask(null)} onSave=${saveTask} />`}
     ${importing && html`<${ImportModal} store=${store} toast=${toast} onClose=${() => setImporting(false)} />`}
+  </div>`;
+}
+
+/* ---------------- Accounts ---------------- */
+const NETWORK = {
+  facebook: { name: 'Facebook', tag: 'f', cls: 'bg-[#1877F2]' },
+  instagram: { name: 'Instagram', tag: 'IG', cls: 'bg-gradient-to-br from-[#f58529] via-[#dd2a7b] to-[#8134af]' },
+  threads: { name: 'Threads', tag: '@', cls: 'bg-black dark:bg-white/20' },
+  x: { name: 'X', tag: 'X', cls: 'bg-black dark:bg-white/20' },
+  linkedin: { name: 'LinkedIn', tag: 'in', cls: 'bg-[#0A66C2]' },
+  tiktok: { name: 'TikTok', tag: 'TT', cls: 'bg-black dark:bg-white/20' },
+  telegram: { name: 'Telegram', tag: 'TG', cls: 'bg-[#229ED9]' },
+  whatsapp: { name: 'WhatsApp', tag: 'WA', cls: 'bg-[#25D366]' },
+  reddit: { name: 'Reddit', tag: 'R', cls: 'bg-[#FF4500]' },
+  gmail: { name: 'Gmail', tag: 'M', cls: 'bg-[#EA4335]' },
+  signal: { name: 'Signal', tag: 'S', cls: 'bg-[#3A76F0]' },
+  youtube: { name: 'YouTube', tag: 'YT', cls: 'bg-[#FF0000]' },
+  pinterest: { name: 'Pinterest', tag: 'P', cls: 'bg-[#E60023]' },
+};
+const NETWORK_ORDER = Object.keys(NETWORK);
+const networkOf = id => NETWORK[id] || { name: id ? id.charAt(0).toUpperCase() + id.slice(1) : 'Account', tag: String(id || '?').slice(0, 2).toUpperCase(), cls: 'bg-slate-500' };
+const KIND = { page: 'Page', profile: 'Profile', channel: 'Channel', group: 'Group', bot: 'Bot', number: 'Number', mailbox: 'Mailbox', organization: 'Company page' };
+const accountName = a => (a && (a.label || a.name)) || 'Account';
+function NetBadge({ id, big }) {
+  const n = networkOf(id);
+  return html`<span title=${n.name} className=${'inline-flex shrink-0 items-center justify-center rounded-lg text-white font-bold ' + n.cls + (big ? ' w-10 h-10 text-sm' : ' w-6 h-6 text-[10px]')}>${n.tag}</span>`;
+}
+
+function ConnectModal({ provider, via, toast, onClose, onDone }) {
+  const fields = via ? [{ key: 'chats', label: 'Channels or groups to add', hint: 'e.g. @soulveemusic — make the bot an admin first' }] : provider.fields;
+  const [f, setF] = useState(() => Object.fromEntries(fields.map(x => [x.key, ''])));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const go = async () => {
+    setBusy(true); setErr('');
+    try {
+      const out = await window.SoulveeOS.accounts.connect(provider.id, via ? { ...f, via } : f);
+      toast(`Connected ${out.accounts.length} account${out.accounts.length === 1 ? '' : 's'}`);
+      onDone();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  return html`<${Modal} title=${via ? 'Add channels' : 'Connect ' + provider.name} onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${go} disabled=${busy || fields.filter(x => x.key !== 'chats' && x.key !== 'subreddit' && x.key !== 'appSecret').some(x => !String(f[x.key]).trim())}>${busy ? 'Connecting…' : 'Connect'}</${Btn}>`}>
+    <div className="space-y-3">
+      ${!via && html`<p className=${'text-sm ' + muted}>${provider.does}.</p>`}
+      ${fields.map(x => html`<${Field} key=${x.key} label=${x.label} hint=${x.hint}><${Input} type=${x.secret ? 'password' : 'text'} autoComplete="off" value=${f[x.key]} onChange=${e => setF(p => ({ ...p, [x.key]: e.target.value }))} /><//>`)}
+      ${!via && provider.note && html`<p className=${'text-xs ' + muted}>${provider.note}</p>`}
+      <p className=${'text-[11px] ' + muted}>What you enter is kept on the Soulvee OS server only, never in the browser.</p>
+      ${err && html`<p className="text-sm text-rose-600 dark:text-rose-400">${err}</p>`}
+    </div>
+  <//>`;
+}
+
+function AccountEditModal({ account, onClose, onSave }) {
+  const [f, setF] = useState(() => ({ label: account.label || '', brands: account.brands || [], subreddit: (account.options || {}).subreddit || '', query: (account.options || {}).query || '' }));
+  const toggle = id => setF(p => ({ ...p, brands: p.brands.includes(id) ? p.brands.filter(b => b !== id) : [...p.brands, id] }));
+  return html`<${Modal} title=${'Edit ' + account.name} onClose=${onClose} footer=${html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${() => onSave(f)}>Save</${Btn}>`}>
+    <div className="space-y-3">
+      ${account.via !== 'buffer' && html`<${Field} label="Your name for it" hint="Optional, e.g. 'DJ page' or 'Emporium IG'"><${Input} value=${f.label} onChange=${e => setF(p => ({ ...p, label: e.target.value }))} placeholder=${account.name} /><//>`}
+      <div><span className=${'block text-xs font-medium mb-1 ' + muted}>Brands</span><div className="flex flex-wrap gap-1.5">${BRANDS.map(b => html`<button key=${b.id} type="button" aria-pressed=${f.brands.includes(b.id)} onClick=${() => toggle(b.id)} className=${'px-3 py-1.5 rounded-full text-xs font-medium ' + (f.brands.includes(b.id) ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300')}>${b.short}</button>`)}</div><span className=${'block text-[11px] mt-1 ' + muted}>Posts for these brands pick this account automatically, and its messages are filed under them.</span></div>
+      ${account.provider === 'reddit' && html`<${Field} label="Default subreddit" hint="Blank posts to your profile"><${Input} value=${f.subreddit} onChange=${e => setF(p => ({ ...p, subreddit: e.target.value }))} placeholder="e.g. afrobeats" /><//>`}
+      ${account.provider === 'gmail' && html`<${Field} label="Which emails come into the inbox" hint="A Gmail search, e.g. in:inbox category:primary newer_than:7d"><${Input} value=${f.query} onChange=${e => setF(p => ({ ...p, query: e.target.value }))} /><//>`}
+    </div>
+  <//>`;
+}
+
+// Posts in the content plan that went (or are going) to an account, for its card.
+function accountActivity(content, id) {
+  const hits = content.flatMap(p => (((p.publish && p.publish.results) || []).filter(r => r.target === id).map(r => ({ post: p, r }))));
+  const next = hits.filter(h => h.r.status === 'scheduled' && h.r.runAt && Date.parse(h.r.runAt) > Date.now()).sort((a, b) => String(a.r.runAt).localeCompare(String(b.r.runAt)))[0];
+  const sent = hits.filter(h => h.r.status === 'sent' || (h.r.ok && h.r.via === 'buffer'));
+  return { next, sent: sent.length, last: sent.map(h => h.r.sentAt || h.post.postedAt).filter(Boolean).sort().pop() || '' };
+}
+
+function AccountsView({ store, toast, unread }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState('');
+  const [form, setForm] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const load = async refresh => { try { setData(await window.SoulveeOS.accounts.list(refresh)); setErr(''); } catch (e) { setErr(e.message); } };
+  useEffect(() => { load(false); }, []);
+  if (err && !data) return html`<${Section} title="Accounts"><${Card}><${Empty} title="Accounts aren't available here">${err}<//><//><//>`;
+  if (!data) return html`<${Section} title="Accounts"><${Card}><p className=${'text-sm ' + muted}>Loading your accounts…</p><//><//>`;
+  const brandMap = ((store.settings.social || {}).brandChannels) || {};
+  const all = [...data.accounts, ...data.buffer.map(b => ({ ...b, brands: BRANDS.filter(x => (brandMap[x.id] || []).includes(b.id.slice(7))).map(x => x.id) }))];
+  const groups = NETWORK_ORDER.map(id => ({ id, list: all.filter(a => a.provider === id) })).filter(g => g.list.length).concat(all.some(a => !NETWORK[a.provider]) ? [{ id: 'other', list: all.filter(a => !NETWORK[a.provider]) }] : []);
+  const signIn = async p => {
+    setBusy(p.id);
+    try { const out = await window.SoulveeOS.accounts.signIn(p.id); location.href = out.url; }
+    catch (e) { toast(e.message); setBusy(''); }
+  };
+  const save = async (a, f) => {
+    if (a.via === 'buffer') {
+      const latest = store.latestSettings();
+      const socialSettings = latest.social || { brandChannels: {} };
+      const chId = a.id.slice(7);
+      const next = Object.fromEntries(BRANDS.map(b => { const cur = ((socialSettings.brandChannels || {})[b.id] || []).filter(x => x !== chId); return [b.id, f.brands.includes(b.id) ? [...cur, chId] : cur]; }));
+      await store.saveSettings({ ...latest, social: { ...socialSettings, brandChannels: next } });
+    }
+    if (a.via !== 'buffer') await window.SoulveeOS.accounts.update(a.id, { label: f.label, brands: f.brands, options: { subreddit: f.subreddit, query: f.query } });
+    setEditing(null); toast('Saved'); load(false);
+  };
+  const act = async (a, what) => {
+    setBusy(a.id + what);
+    try {
+      if (what === 'test') { const r = await window.SoulveeOS.accounts.test(a.id); toast(r.account.status === 'ok' ? `${accountName(a)} is connected` : r.account.error); }
+      if (what === 'toggle') { await window.SoulveeOS.accounts.update(a.id, { enabled: !a.enabled }); toast(a.enabled ? `${accountName(a)} switched off` : `${accountName(a)} switched on`); }
+      if (what === 'remove') { if (!confirm(`Remove ${accountName(a)} from Soulvee OS? Its conversations here are deleted too. Nothing changes on ${networkOf(a.provider).name} itself.`)) { setBusy(''); return; } await window.SoulveeOS.accounts.remove(a.id); toast(`${accountName(a)} removed`); }
+    } catch (e) { toast(e.message); }
+    setBusy(''); load(false);
+  };
+  const counts = groups.map(g => `${g.list.length} ${networkOf(g.id).name}`).join(' · ');
+  return html`<div className="space-y-6">
+    <${Section} title="Accounts" sub="Every Page, profile, channel, number and mailbox you run, managed in one place. Connect as many of each as you have." action=${html`<${Btn} small kind="ghost" onClick=${() => load(true)}>Refresh</${Btn}>`}>
+      ${all.length > 0 && html`<p className=${'text-xs ' + muted}>${all.length} connected: ${counts}${unread ? ` · ${unread} unread in the inbox` : ''}</p>`}
+      ${data.bufferError && html`<p className="text-xs text-amber-700 dark:text-amber-300">${data.bufferError}</p>`}
+    <//>
+    ${all.length === 0 && html`<${Card}><${Empty} title="Nothing connected yet">Connect your Facebook Pages, Instagram, Threads, X, LinkedIn, Telegram, WhatsApp, Reddit, Gmail or Signal below. Posts can then go out from Content, and messages land in the Inbox.<//><//>`}
+    ${groups.map(g => html`<div key=${g.id} className="space-y-2">
+      <div className="flex items-center gap-2"><${NetBadge} id=${g.id} /><p className="font-semibold text-sm">${networkOf(g.id).name}</p><span className=${'text-xs ' + muted}>· ${g.list.length}</span></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">${g.list.map(a => {
+        const done = accountActivity(store.data.content, a.id);
+        const soon = a.expiresAt && Date.parse(a.expiresAt) - Date.now() < 7 * 864e5 && a.provider === 'linkedin';
+        return html`<${Card} key=${a.id}>
+          <div className="flex items-start gap-3">
+            ${a.avatar ? html`<img src=${a.avatar} alt="" className="w-10 h-10 rounded-xl object-cover shrink-0 bg-slate-100 dark:bg-white/10" />` : html`<${NetBadge} id=${a.provider} big />`}
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold truncate">${accountName(a)}</p>
+              <p className=${'text-xs truncate ' + muted}>${[a.label ? a.name : '', a.handle, KIND[a.kind] || '', a.via === 'buffer' ? 'via Buffer' : '', a.meta && a.meta.page && a.provider === 'instagram' ? 'linked to ' + a.meta.page : ''].filter(Boolean).join(' · ')}</p>
+              <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                ${a.enabled === false ? html`<${Pill} tone="amber">switched off</${Pill}>` : a.status === 'error' ? html`<${Pill} tone="red">needs attention</${Pill}>` : html`<${Pill} tone="green">connected</${Pill}>`}
+                ${a.can && a.can.publish && html`<${Pill}>posts</${Pill}>`}${a.can && a.can.inbox && html`<${Pill}>inbox</${Pill}>`}
+                ${(a.brands || []).map(b => html`<${BrandChip} key=${b} id=${b} />`)}
+              </div>
+            </div>
+          </div>
+          ${a.error && html`<p className="text-xs mt-2 text-rose-600 dark:text-rose-400">${a.error}</p>`}
+          ${soon && html`<p className="text-xs mt-2 text-amber-700 dark:text-amber-300">This sign-in ends ${fmtDate(a.expiresAt)}. Reconnect before then to keep posting.</p>`}
+          ${(done.next || done.sent > 0) && html`<p className=${'text-xs mt-2 ' + muted}>${done.next ? `Next: "${done.next.post.title || 'post'}" ${fmtSlot(done.next.r.runAt)}` : ''}${done.next && done.sent ? ' · ' : ''}${done.sent ? `${done.sent} posted from Soulvee OS${done.last ? ', last ' + fmtDate(done.last) : ''}` : ''}</p>`}
+          <div className="flex gap-2 mt-3 flex-wrap">
+            <${Btn} small kind="ghost" onClick=${() => setEditing(a)}>Brands${a.via === 'buffer' ? '' : ' & name'}</${Btn}>
+            ${a.via !== 'buffer' && html`<${Btn} small kind="ghost" disabled=${!!busy} onClick=${() => act(a, 'test')}>${busy === a.id + 'test' ? 'Testing…' : 'Test'}</${Btn}>`}
+            ${a.provider === 'telegram' && a.kind === 'bot' && html`<${Btn} small kind="ghost" onClick=${() => setForm({ provider: data.providers.find(p => p.id === 'telegram'), via: a.id })}>+ Channels</${Btn}>`}
+            ${a.via !== 'buffer' && html`<${Btn} small kind="ghost" disabled=${!!busy} onClick=${() => act(a, 'toggle')}>${a.enabled === false ? 'Switch on' : 'Switch off'}</${Btn}>`}
+            ${a.via !== 'buffer' && html`<${Btn} small kind="danger" disabled=${!!busy} onClick=${() => act(a, 'remove')}>Remove</${Btn}>`}
+            ${a.via === 'buffer' && html`<a href="https://publish.buffer.com" target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Manage in Buffer</a>`}
+          </div>
+        <//>`;
+      })}</div>
+    </div>`)}
+
+    <${Section} title="Connect" sub="Each platform needs its own developer app or token. The README's platform guide has the steps for each.">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">${data.providers.map(p => html`<${Card} key=${p.id}>
+        <div className="flex items-start gap-3">
+          <div className="flex -space-x-1.5 shrink-0">${p.platforms.map(id => html`<${NetBadge} key=${id} id=${id} />`)}</div>
+          <div className="min-w-0 flex-1"><p className="font-semibold text-sm">${p.name}</p><p className=${'text-xs ' + muted}>${p.does}</p></div>
+        </div>
+        <p className=${'text-[11px] mt-2 ' + muted}>${p.note}</p>
+        ${p.id === 'whatsapp' && html`<div className="mt-2 p-2 rounded-lg text-[11px] bg-slate-50 dark:bg-white/5 space-y-0.5 break-all">
+          <p><span className="font-semibold">Webhook address:</span> ${p.webhook.url}</p>
+          <p><span className="font-semibold">Verify token:</span> ${p.webhook.verifyToken}</p>
+          ${!p.webhook.publicUrl && html`<p className="text-amber-700 dark:text-amber-300">Set PUBLIC_URL to this server's public https address, so Meta can deliver messages.</p>`}
+        </div>`}
+        <div className="flex gap-2 mt-3 flex-wrap">
+          ${p.viaBuffer ? (data.bufferConnected ? html`<a href="https://publish.buffer.com" target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Add ${p.name} in Buffer</a>` : html`<span className=${'text-xs ' + muted}>Add BUFFER_API_KEY to the server first.</span>`) : null}
+          ${p.oauth === true && html`<${Btn} small onClick=${() => signIn(p)} disabled=${busy === p.id}>${busy === p.id ? 'Opening…' : 'Sign in with ' + (p.id === 'gmail' ? 'Google' : p.name.split(' ')[0])}</${Btn}>`}
+          ${p.oauth === false && p.env && html`<span className=${'text-xs ' + muted}>To sign in, add ${p.env} to the server's .env and restart it.</span>`}
+          ${!p.viaBuffer && p.fields.length > 0 && html`<${Btn} small kind=${p.oauth ? 'ghost' : 'primary'} onClick=${() => setForm({ provider: p })}>${p.id === 'meta' ? 'Paste a token' : 'Connect'}</${Btn}>`}
+        </div>
+      <//>`)}</div>
+      <p className=${'text-xs ' + muted}>Sign-ins come back to ${data.redirect}<span className="font-mono">platform</span>. Register that address (for example ${data.redirect}meta) in each developer app.</p>
+    <//>
+    ${form && html`<${ConnectModal} provider=${form.provider} via=${form.via} toast=${toast} onClose=${() => setForm(null)} onDone=${() => { setForm(null); load(false); }} />`}
+    ${editing && html`<${AccountEditModal} account=${editing} onClose=${() => setEditing(null)} onSave=${f => save(editing, f)} />`}
+  </div>`;
+}
+
+/* ---------------- Inbox ---------------- */
+const SOURCE_FOR = { whatsapp: 'WhatsApp', instagram: 'Instagram', gmail: 'Email', linkedin: 'LinkedIn', tiktok: 'TikTok' };
+// The CRM contact a conversation is with: a saved link first, then the phone, email or handle.
+function contactForPeer(contacts, c) {
+  const p = c.peer || {};
+  const handle = v => bare(v).replace(/^u\//i, '').toLowerCase();
+  return contacts.find(x => (x.links || []).some(l => l.provider === c.provider && String(l.id) === String(p.id)))
+    || (p.phone && contacts.find(x => [x.phone, x.whatsapp, x.signal].some(n => samePhone(n, p.phone))))
+    || (p.email && contacts.find(x => x.email && normEmail(x.email) === normEmail(p.email)))
+    || (c.provider === 'telegram' && p.handle && contacts.find(x => x.telegram && handle(x.telegram) === handle(p.handle)))
+    || (c.provider === 'instagram' && p.handle && contacts.find(x => x.instagram && handle(x.instagram) === handle(p.handle)))
+    || (c.provider === 'reddit' && p.id && contacts.find(x => x.reddit && handle(x.reddit) === String(p.id).toLowerCase()))
+    || null;
+}
+// A new contact from the person in a conversation, with what the platform told us about them.
+function contactFromPeer(c, brands) {
+  const p = c.peer || {};
+  return {
+    ...blankContact(),
+    name: p.name || p.handle || p.phone || p.email || 'New contact',
+    phone: p.phone || '',
+    email: p.email || '',
+    whatsapp: c.provider === 'whatsapp' ? p.phone || '' : '',
+    signal: c.provider === 'signal' ? p.phone || '' : '',
+    telegram: c.provider === 'telegram' ? p.handle || '' : '',
+    instagram: c.provider === 'instagram' ? p.handle || '' : '',
+    reddit: c.provider === 'reddit' && p.id ? 'u/' + p.id : '',
+    source: SOURCE_FOR[c.provider] || 'Direct',
+    brands: brands || [],
+    links: p.id ? [{ provider: c.provider, id: String(p.id) }] : [],
+  };
+}
+const ago = iso => { const s = (Date.now() - Date.parse(iso)) / 1000; if (!(s >= 0)) return ''; if (s < 60) return 'now'; if (s < 3600) return Math.floor(s / 60) + 'm'; if (s < 86400) return Math.floor(s / 3600) + 'h'; return Math.floor(s / 86400) + 'd'; };
+
+function InboxView({ store, caps, toast, openKey, setOpenKey, onUnread, go, openContact }) {
+  const [list, setList] = useState(null);
+  const [err, setErr] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [q, setQ] = useState('');
+  const [convo, setConvo] = useState(null);
+  const [text, setText] = useState('');
+  const [template, setTemplate] = useState('');
+  const [busy, setBusy] = useState('');
+  const [linking, setLinking] = useState(false);
+  const endRef = useRef(null);
+  const load = async () => { try { const r = await window.SoulveeOS.inbox.list(); setList(r.conversations); onUnread(r.unread); setErr(''); return r; } catch (e) { setErr(e.message); return null; } };
+  const open = async key => {
+    try {
+      const r = await window.SoulveeOS.inbox.get(key);
+      setConvo(r.conversation); setText(''); setTemplate(''); setLinking(false);
+      if (r.conversation.unread) { await window.SoulveeOS.inbox.read(key); load(); }
+    } catch (e) { toast(e.message); }
+  };
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, []);
+  useEffect(() => { if (openKey) { open(openKey); setOpenKey(null); } }, [openKey]);
+  useEffect(() => { if (endRef.current && endRef.current.scrollIntoView) endRef.current.scrollIntoView({ block: 'end' }); }, [convo && convo.messages && convo.messages.length]);
+  useEffect(() => {
+    if (!convo) return undefined;
+    const t = setInterval(() => window.SoulveeOS.inbox.get(convo.key).then(r => setConvo(c => (c && c.key === r.conversation.key ? r.conversation : c)), () => {}), 15000);
+    return () => clearInterval(t);
+  }, [convo && convo.key]);
+
+  if (err && !list) return html`<${Section} title="Inbox"><${Card}><${Empty} title="The inbox isn't available here">${err}<//><//><//>`;
+  if (!list) return html`<${Section} title="Inbox"><${Card}><p className=${'text-sm ' + muted}>Loading messages…</p><//><//>`;
+  const sync = async () => { setBusy('sync'); try { const r = await window.SoulveeOS.inbox.sync(); setList(r.conversations); onUnread(r.unread); toast(r.added ? `${r.added} new message${r.added === 1 ? '' : 's'}` : 'No new messages'); } catch (e) { toast(e.message); } setBusy(''); };
+  const nets = [...new Set(list.map(c => c.provider))];
+  const needle = q.trim().toLowerCase();
+  const shown = list.filter(c => (filter === 'all' || (filter === 'unread' ? c.unread > 0 : c.provider === filter)) && (!needle || [c.peer.name, c.peer.handle, c.peer.phone, c.peer.email, c.subject, c.lastText, c.account].join(' ').toLowerCase().includes(needle)));
+  const who = convo && contactForPeer(store.data.contacts, convo);
+  const late = convo && convo.provider === 'whatsapp' && (!convo.lastInboundAt || Date.now() - Date.parse(convo.lastInboundAt) > 24 * 3600e3);
+  const send = async () => {
+    if (!convo || busy) return;
+    setBusy('send');
+    try {
+      const r = await window.SoulveeOS.inbox.reply(convo.key, late && template.trim() ? { template: { name: template.trim(), language: 'en' } } : { text });
+      setConvo(r.conversation); setText(''); setTemplate(''); load();
+    } catch (e) { toast(e.message); }
+    setBusy('');
+  };
+  const draft = async () => {
+    if (!caps.sample || !convo || busy) return;
+    setBusy('draft');
+    const brand = (convo.brands || [])[0] || (who && (who.brands || [])[0]) || 'smc';
+    const history = convo.messages.slice(-12).map(m => `${m.dir === 'in' ? (convo.peer.name || 'Them') : 'Soulvee'}: ${m.text}`).join('\n');
+    try {
+      const r = await caps.sample(`${voiceFor(brand)}
+Draft Soulvee's next reply in this ${networkOf(convo.provider).name} conversation${convo.subject ? ` (subject: "${convo.subject}")` : ''}. Answer what they asked, move things towards a booking or sale where it fits, and keep it short and natural for ${networkOf(convo.provider).name}. Plain text only. Don't invent prices, dates or availability that aren't in the conversation or below.
+${who ? `What the CRM knows: ${contactLabel(who)}, stage ${lifecycleOf(who.stage).name}${(who.tags || []).length ? ', tags ' + who.tags.join(', ') : ''}${who.notes ? '. Notes: ' + who.notes : ''}.` : ''}
+Offers and prices: ${store.data.offers.filter(o => o.status !== 'retired' && (!brand || o.brand === brand)).slice(0, 6).map(o => `${o.name} (${(o.tiers || []).filter(t => num(t.price) > 0).map(t => t.name + ' ' + ngn(t.price)).join(', ') || 'price on request'})`).join('; ') || 'none listed'}.
+Conversation, oldest first:
+${history}`, { effort: 'low' });
+      setText((r.text || '').trim());
+    } catch (e) { toast(sampleMessage(e)); }
+    setBusy('');
+  };
+  const addContact = async () => {
+    const made = await store.add('contacts', contactFromPeer(convo, convo.brands));
+    toast(`${made.name} added to your contacts`);
+  };
+  const linkTo = async id => {
+    const c = store.data.contacts.find(x => x.id === id);
+    if (!c) return;
+    const p = convo.peer || {};
+    const patch = { links: [...(c.links || []).filter(l => !(l.provider === convo.provider && String(l.id) === String(p.id))), ...(p.id ? [{ provider: convo.provider, id: String(p.id) }] : [])] };
+    const fill = contactFromPeer(convo, []);
+    ['phone', 'email', 'whatsapp', 'signal', 'telegram', 'instagram', 'reddit'].forEach(k => { if (fill[k] && !c[k]) patch[k] = fill[k]; });
+    await store.update('contacts', c.id, patch);
+    setLinking(false);
+    toast(`Linked to ${c.name}`);
+  };
+  const people = [...store.data.contacts].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const listPane = html`<div className=${'space-y-3 ' + (convo ? 'hidden lg:block' : '')}>
+    <input className=${inputCls} aria-label="Search messages" value=${q} onChange=${e => setQ(e.target.value)} placeholder="Search people and messages" />
+    <${Chips} value=${filter} onChange=${setFilter} options=${[{ v: 'all', l: 'All' }, { v: 'unread', l: 'Unread' }, ...nets.map(n => ({ v: n, l: networkOf(n).name }))]} />
+    ${list.length === 0 ? html`<${Card}><${Empty} title="No messages yet">Connect WhatsApp, Facebook Pages, Instagram, Telegram, Gmail, Reddit or Signal in Accounts. New messages arrive here within a minute.<//><${Btn} small kind="ghost" onClick=${() => go('accounts')}>Open Accounts</${Btn}><//>` : shown.length === 0 ? html`<${Card}><${Empty} title="Nothing matches">Try another filter.<//><//>` : html`<${Card} className="!p-0 overflow-hidden">${shown.map(c => html`<button key=${c.key} onClick=${() => open(c.key)} className=${'w-full text-left flex gap-3 px-4 py-3 border-b last:border-0 border-slate-100 dark:border-white/5 ' + (convo && convo.key === c.key ? 'bg-violet-50 dark:bg-violet-500/10' : 'hover:bg-slate-50 dark:hover:bg-white/5')}>
+      <${NetBadge} id=${c.provider} />
+      <div className="min-w-0 flex-1">
+        <div className="flex justify-between gap-2"><p className=${'text-sm truncate ' + (c.unread ? 'font-bold' : 'font-medium')}>${c.peer.name || c.peer.handle || 'Unknown'}</p><span className=${'text-[11px] shrink-0 ' + muted}>${ago(c.lastAt)}</span></div>
+        <p className=${'text-xs truncate ' + (c.unread ? '' : muted)}>${c.lastDir === 'out' ? 'You: ' : ''}${c.subject && c.provider === 'gmail' ? c.subject + ' — ' : ''}${c.lastText}</p>
+        <p className=${'text-[11px] truncate ' + muted}>${c.account}</p>
+      </div>
+      ${c.unread > 0 && html`<span className="self-center shrink-0 min-w-[1.25rem] h-5 px-1.5 rounded-full bg-violet-600 text-white text-[11px] font-bold flex items-center justify-center" aria-label=${c.unread + ' unread'}>${c.unread}</span>`}
+    </button>`)}<//>`}
+  </div>`;
+  const pane = convo && html`<${Card} className="!p-0 overflow-hidden flex flex-col">
+    <div className="flex items-start gap-3 p-4 border-b border-slate-100 dark:border-white/10">
+      <button className="lg:hidden text-sm text-violet-500 shrink-0" onClick=${() => setConvo(null)} aria-label="Back to conversations">←</button>
+      <${NetBadge} id=${convo.provider} />
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold truncate">${convo.peer.name || convo.peer.handle || 'Unknown'}</p>
+        <p className=${'text-xs truncate ' + muted}>${[convo.peer.handle, convo.peer.phone, convo.peer.email, networkOf(convo.provider).name + ' · ' + convo.account].filter(Boolean).join(' · ')}</p>
+        <div className="mt-1.5 flex flex-wrap gap-2 items-center text-xs">
+          ${who ? html`<button className="font-medium text-violet-500" onClick=${() => openContact(who)}>Contact: ${who.name}</button>` : html`<${Btn} small kind="ghost" onClick=${addContact}>Add to contacts</${Btn}><${Btn} small kind="ghost" onClick=${() => setLinking(v => !v)}>Link to a contact</${Btn}>`}
+        </div>
+        ${linking && html`<div className="mt-2 w-full max-w-xs"><${Select} value="" onChange=${linkTo} options=${[{ v: '', l: 'Choose a contact…' }, ...people.map(c => ({ v: c.id, l: contactLabel(c) }))]} /></div>`}
+      </div>
+    </div>
+    <div className="p-4 space-y-2 max-h-[52vh] overflow-y-auto">
+      ${convo.subject && html`<p className=${'text-xs font-medium ' + muted}>${convo.subject}</p>`}
+      ${convo.messages.map(m => html`<div key=${m.id} className=${'flex ' + (m.dir === 'out' ? 'justify-end' : 'justify-start')}>
+        <div className=${'max-w-[85%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap break-words ' + (m.dir === 'out' ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white' : 'bg-slate-100 dark:bg-white/10')}>
+          ${m.author && html`<p className="text-[11px] font-semibold opacity-80">${m.author}</p>`}${m.text}
+          <p className=${'text-[10px] mt-1 ' + (m.dir === 'out' ? 'text-white/75' : muted)}>${fmtDateTime(m.at)}${m.status && m.dir === 'out' ? ' · ' + m.status : ''}${m.error ? ' · ' + m.error : ''}</p>
+        </div>
+      </div>`)}
+      <div ref=${endRef}></div>
+    </div>
+    <div className="p-3 border-t border-slate-100 dark:border-white/10 space-y-2">
+      ${late && html`<p className="text-xs text-amber-700 dark:text-amber-300">More than 24 hours have passed since they last wrote, so WhatsApp only allows an approved template. Enter its name to send it, or wait for them to write again.</p>`}
+      ${late ? html`<input className=${inputCls} aria-label="Template name" value=${template} onChange=${e => setTemplate(e.target.value)} placeholder="Approved template name, e.g. follow_up" />` : html`<textarea rows="3" className=${inputCls + ' resize-none'} aria-label="Reply" value=${text} onChange=${e => setText(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); }} placeholder=${'Reply on ' + networkOf(convo.provider).name + '…'}></textarea>`}
+      <div className="flex gap-2 justify-end flex-wrap">
+        ${caps.sample && !late && html`<${Btn} small kind="ghost" onClick=${draft} disabled=${!!busy}>${busy === 'draft' ? 'Drafting…' : '✦ Draft reply'}</${Btn}>`}
+        <${Btn} small onClick=${send} disabled=${!!busy || (late ? !template.trim() : !text.trim())}>${busy === 'send' ? 'Sending…' : late ? 'Send template' : 'Send'}</${Btn}>
+      </div>
+    </div>
+  <//>`;
+  return html`<div className="space-y-4">
+    <${Section} title="Inbox" sub="WhatsApp, Messenger, Instagram, Telegram, Gmail, Reddit and Signal messages in one place. Replies go out from the account each message came in on." action=${html`<${Btn} small kind="ghost" onClick=${sync} disabled=${busy === 'sync'}>${busy === 'sync' ? 'Checking…' : 'Check now'}</${Btn}>`} />
+    <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+      <div className="lg:col-span-2">${listPane}</div>
+      <div className="lg:col-span-3">${pane || html`<div className="hidden lg:block"><${Card}><${Empty} title="Pick a conversation">Its messages and a reply box open here.<//><//></div>`}</div>
+    </div>
   </div>`;
 }
 
@@ -1290,11 +1636,14 @@ function postWarnings(p) {
   return out;
 }
 
-function shareLink(platform, text) {
+function shareLink(platform, text, title) {
   const t = encodeURIComponent(text || '');
   if (platform === 'x') return 'https://x.com/intent/post?text=' + t;
   if (platform === 'threads') return 'https://www.threads.net/intent/post?text=' + t;
   if (platform === 'linkedin') return 'https://www.linkedin.com/feed/?shareActive=true&text=' + t;
+  if (platform === 'telegram') return 'https://t.me/share/url?url=' + t;
+  if (platform === 'whatsapp') return 'https://wa.me/?text=' + t;
+  if (platform === 'reddit') return 'https://www.reddit.com/submit?type=TEXT&title=' + encodeURIComponent(title || String(text || '').split('\n')[0]) + '&text=' + t;
   return platformOf(platform).url;
 }
 
@@ -1378,50 +1727,106 @@ ${f.text}`, { effort: 'low' });
   <//>`;
 }
 
-function PublishModal({ post, social, channels, store, toast, onClose, onDone }) {
-  const services = (post.platforms || []).map(id => platformOf(id).service);
-  const usable = (channels || []).filter(c => services.includes(c.service));
+// What happened to one account a post went to, in a few words.
+function resultLine(r) {
+  if (r.via === 'buffer') return r.ok ? (r.dueAt ? 'scheduled in Buffer for ' + fmtSlot(r.dueAt) : 'sent to Buffer') : r.message;
+  if (r.status === 'sent') return 'posted';
+  if (r.status === 'failed' || r.ok === false) return r.error || r.message || 'failed';
+  if (r.status === 'cancelled') return 'cancelled';
+  if (r.status === 'sending') return 'sending…';
+  if (r.status === 'scheduled' && r.error) return `will try again ${fmtSlot(r.runAt)} (${r.error})`;
+  if (r.status === 'scheduled') return 'goes out ' + fmtSlot(r.runAt);
+  return r.status || '';
+}
+const resultTone = r => (r.status === 'failed' || r.ok === false ? 'text-rose-600 dark:text-rose-400' : r.status === 'sent' || (r.via === 'buffer' && r.ok) ? 'text-emerald-600 dark:text-emerald-400' : muted);
+const resultIcon = r => (r.status === 'failed' || r.ok === false ? '✕' : r.status === 'sent' || (r.via === 'buffer' && r.ok) ? '✓' : '⏳');
+// A post's status after publishing: scheduled while any account is still to go, then posted, or failed
+// (needs attention) if any account refused it. Each account's own result stays on the post.
+function statusAfter(results, when) {
+  const failed = results.filter(r => r.status === 'failed' || r.ok === false);
+  const waiting = results.filter(r => r.jobId && ['scheduled', 'sending'].includes(r.status));
+  if (waiting.length || (when === 'scheduled' && failed.length < results.length)) return 'scheduled';
+  return failed.length ? 'failed' : 'posted';
+}
+
+function PublishModal({ post, social, accounts, store, toast, onClose, onDone }) {
+  const usable = (accounts.list || []).filter(a => a.enabled !== false && a.can && a.can.publish);
+  const wanted = post.platforms || [];
+  const matching = usable.filter(a => wanted.includes(a.provider));
+  const others = usable.filter(a => !wanted.includes(a.provider));
   const saved = ((store.settings.social || {}).brandChannels || {})[post.brand] || [];
-  const healthy = c => !c.isDisconnected && !c.isLocked;
-  const [target, setTarget] = useState(social.buffer && social.allowed ? 'buffer' : social.webhook && social.allowed ? 'webhook' : 'manual');
-  const [picked, setPicked] = useState(() => { const s = usable.filter(c => saved.includes(c.id) && healthy(c)).map(c => c.id); return s.length ? s : usable.filter(healthy).map(c => c.id); });
+  const forBrand = a => (a.via === 'buffer' ? saved.includes(a.id.slice(7)) : (a.brands || []).includes(post.brand));
+  const healthy = a => a.status !== 'error';
+  // Accounts given this brand are ticked; with no brand set, a platform's only account is ticked. Trying a
+  // failed post again ticks only the accounts that refused it, so the others don't get it twice.
+  const before = (post.status === 'failed' && post.publish && post.publish.target === 'accounts' && post.publish.results) || null;
+  const start = () => (before
+    ? before.filter(r => r.status === 'failed' || r.ok === false).map(r => r.target).filter(id => usable.some(a => a.id === id))
+    : matching.filter(a => healthy(a) && (forBrand(a) || (!matching.some(x => x.provider === a.provider && forBrand(x)) && matching.filter(x => x.provider === a.provider).length === 1))).map(a => a.id));
+  const [target, setTarget] = useState(usable.length && social.allowed ? 'accounts' : social.webhook && social.allowed ? 'webhook' : 'manual');
+  const [picked, setPicked] = useState(start);
+  const [more, setMore] = useState(() => !!before && before.some(r => (r.status === 'failed' || r.ok === false) && others.some(a => a.id === r.target)));
   const future = !!post.scheduledAt && Date.parse(post.scheduledAt) > Date.now() + 60000;
   const [when, setWhen] = useState(future ? 'scheduled' : 'now');
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState(null);
+  const firstReddit = usable.find(a => a.provider === 'reddit' && picked.includes(a.id));
+  const [reddit, setReddit] = useState({ subreddit: '', title: post.title || String(post.text || '').split('\n')[0].slice(0, 300) });
   const warnings = postWarnings(post);
-  const tabs = [social.buffer && { v: 'buffer', l: 'Buffer' }, social.webhook && { v: 'webhook', l: 'Webhook' }, { v: 'manual', l: 'Post by hand' }].filter(Boolean);
+  const tabs = [{ v: 'accounts', l: 'Accounts' }, social.webhook && { v: 'webhook', l: 'Webhook' }, { v: 'manual', l: 'Post by hand' }].filter(Boolean);
+  const toggle = id => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]));
+
+  // "Use these next time": the brand is added to the ticked accounts and taken off the unticked ones shown here.
+  const rememberChoice = async () => {
+    const shown = [...matching, ...(more ? others : [])];
+    const latest = store.latestSettings();
+    const socialSettings = latest.social || { brandChannels: {} };
+    const bufferIds = shown.filter(a => a.via === 'buffer').map(a => a.id.slice(7));
+    const keep = ((socialSettings.brandChannels || {})[post.brand] || []).filter(id => !bufferIds.includes(id));
+    const chosen = picked.filter(id => id.startsWith('buffer:')).map(id => id.slice(7));
+    if (bufferIds.length) await store.saveSettings({ ...latest, social: { ...socialSettings, brandChannels: { ...(socialSettings.brandChannels || {}), [post.brand]: [...keep, ...chosen] } } });
+    for (const a of shown.filter(x => x.via !== 'buffer')) {
+      const has = (a.brands || []).includes(post.brand);
+      const want = picked.includes(a.id);
+      if (has !== want) await window.SoulveeOS.accounts.update(a.id, { brands: want ? [...(a.brands || []), post.brand] : (a.brands || []).filter(b => b !== post.brand) }).catch(() => {});
+    }
+  };
 
   const send = async () => {
     setBusy(true);
-    const payload = { id: post.id, brand: post.brand, title: post.title, text: post.text, media: post.media || [], platforms: post.platforms || [], channels: picked, scheduledAt: when === 'scheduled' ? post.scheduledAt : null, igType: post.igType || '', firstComment: post.firstComment || '', ytCategory: post.ytCategory || YT_CATEGORY[post.brand] || '22', aiAssisted: !!post.aiAssisted };
+    const base = { id: post.id, brand: post.brand, title: post.title, text: post.text, media: post.media || [], platforms: post.platforms || [], scheduledAt: when === 'scheduled' ? post.scheduledAt : null, igType: post.igType || '', firstComment: post.firstComment || '', ytCategory: post.ytCategory || YT_CATEGORY[post.brand] || '22', aiAssisted: !!post.aiAssisted };
     try {
-      const out = await window.SoulveeOS.social.publish(payload, target);
       const at = new Date().toISOString();
       if (target === 'webhook') {
+        const out = await window.SoulveeOS.social.publish(base, 'webhook');
         await onDone({ status: 'scheduled', publish: { target, at, when, jobId: out.job.id, runAt: out.job.runAt } });
         toast(when === 'now' ? 'Sent to your webhook' : 'Queued — Soulvee OS sends it at the scheduled time');
         onClose();
       }
-      if (target === 'buffer') {
-        const ok = out.results.filter(r => r.ok);
+      if (target === 'accounts') {
+        const out = await window.SoulveeOS.social.publish({ ...base, targets: picked, subreddit: firstReddit ? reddit.subreddit : '', redditTitle: firstReddit ? reddit.title : '' }, 'accounts');
         setResults(out.results);
-        if (remember && ok.length) {
-          const latest = store.latestSettings();
-          const socialSettings = latest.social || { brandChannels: {} };
-          await store.saveSettings({ ...latest, social: { ...socialSettings, brandChannels: { ...(socialSettings.brandChannels || {}), [post.brand]: picked } } });
-        }
-        await onDone({ status: ok.length ? 'scheduled' : 'failed', publish: { target, at, when, results: out.results } });
-        if (ok.length === out.results.length) { toast(when === 'now' ? 'Sent to Buffer — it goes out in a moment' : 'Scheduled in Buffer'); onClose(); }
+        if (remember) await rememberChoice();
+        const status = statusAfter(out.results, when);
+        await onDone({ status, ...(status === 'posted' ? { postedAt: at } : {}), publish: { target, at, when, results: out.results } });
+        const bad = out.results.filter(r => r.status === 'failed' || r.ok === false).length;
+        if (!bad) { toast(when === 'now' ? (status === 'posted' ? `Posted to ${out.results.length} account${out.results.length === 1 ? '' : 's'}` : 'Sending — results appear on the post') : `Scheduled for ${out.results.length} account${out.results.length === 1 ? '' : 's'}`); onClose(); }
       }
     } catch (e) { toast(e.message); }
     setBusy(false);
   };
 
+  const row = a => html`<label key=${a.id} className="flex items-center gap-2 text-sm p-2 rounded-xl bg-slate-50 dark:bg-white/5">
+    <input type="checkbox" aria-label=${accountName(a) + ' on ' + networkOf(a.provider).name} disabled=${!healthy(a)} checked=${picked.includes(a.id)} onChange=${() => toggle(a.id)} />
+    ${a.avatar ? html`<img src=${a.avatar} alt="" className="w-6 h-6 rounded-full shrink-0" />` : html`<${NetBadge} id=${a.provider} />`}
+    <span className="flex-1 min-w-0 truncate">${accountName(a)} <span className=${muted}>· ${networkOf(a.provider).name}${a.via === 'buffer' ? ' via Buffer' : ''}${KIND[a.kind] && a.via !== 'buffer' ? ' ' + KIND[a.kind].toLowerCase() : ''}</span></span>
+    ${!healthy(a) && html`<${Pill} tone="red">needs attention</${Pill}>`}${(a.brands || []).includes(post.brand) && html`<${BrandChip} id=${post.brand} />`}
+  </label>`;
+
   const footer = target === 'manual'
     ? html`<${Btn} kind="ghost" onClick=${onClose}>Close</${Btn}><${Btn} kind="good" onClick=${async () => { await onDone({ status: 'posted', postedAt: new Date().toISOString(), publish: { target: 'manual', at: new Date().toISOString() } }); toast('Marked as posted'); onClose(); }}>I've posted it</${Btn}>`
-    : html`<${Btn} kind="ghost" onClick=${onClose}>Cancel</${Btn}><${Btn} onClick=${send} disabled=${busy || !social.allowed || (target === 'buffer' && !picked.length)}>${busy ? 'Sending…' : target === 'buffer' ? (when === 'now' ? 'Post now via Buffer' : 'Schedule in Buffer') : (when === 'now' ? 'Send to webhook now' : 'Queue for webhook')}</${Btn}>`;
+    : html`<${Btn} kind="ghost" onClick=${onClose}>${results ? 'Close' : 'Cancel'}</${Btn}><${Btn} onClick=${send} disabled=${busy || !social.allowed || (target === 'accounts' && !picked.length)}>${busy ? 'Sending…' : target === 'accounts' ? (when === 'now' ? `Post now to ${picked.length || ''} account${picked.length === 1 ? '' : 's'}` : `Schedule for ${picked.length || ''} account${picked.length === 1 ? '' : 's'}`) : (when === 'now' ? 'Send to webhook now' : 'Queue for webhook')}</${Btn}>`;
 
   return html`<${Modal} title=${'Publish · ' + (post.title || 'post')} onClose=${onClose} footer=${footer}>
     <div className="space-y-4">
@@ -1432,25 +1837,27 @@ function PublishModal({ post, social, channels, store, toast, onClose, onDone })
         <label className="flex items-center gap-2"><input type="radio" name="when" checked=${when === 'now'} onChange=${() => setWhen('now')} /> Now</label>
         ${!future && html`<span className=${'text-xs ' + muted}>Set a date and time on the post to schedule it.</span>`}
       </div>`}
-      ${target === 'buffer' && html`<div>
-        <p className=${'text-xs font-medium mb-2 ' + muted}>Buffer channels</p>
-        ${usable.length === 0 ? html`<p className="text-sm text-amber-700 dark:text-amber-300">None of your Buffer channels match this post's platforms (${(post.platforms || []).map(id => platformOf(id).name).join(', ')}). Connect them in Buffer, or change the platforms.</p>` : html`<div className="space-y-1.5">${usable.map(c => html`<label key=${c.id} className="flex items-center gap-2 text-sm p-2 rounded-xl bg-slate-50 dark:bg-white/5">
-          <input type="checkbox" disabled=${!healthy(c)} checked=${picked.includes(c.id)} onChange=${e => setPicked(p => e.target.checked ? [...p, c.id] : p.filter(x => x !== c.id))} />
-          ${c.avatar ? html`<img src=${c.avatar} alt="" className="w-6 h-6 rounded-full" />` : null}
-          <span className="flex-1 min-w-0 truncate">${c.displayName || c.name} <span className=${muted}>· ${SERVICE_LABEL[c.service] || c.service}</span></span>
-          ${c.isDisconnected && html`<${Pill} tone="red">disconnected</${Pill}>`}${c.isLocked && html`<${Pill} tone="red">locked</${Pill}>`}${c.isQueuePaused && html`<${Pill} tone="amber">queue paused</${Pill}>`}
-        </label>`)}</div>`}
-        <label className="flex items-center gap-2 text-xs mt-2"><input type="checkbox" checked=${remember} onChange=${e => setRemember(e.target.checked)} /> Use these channels for ${brandOf(post.brand).short} next time</label>
+      ${target === 'accounts' && html`<div className="space-y-2">
+        ${accounts.error && html`<p className="text-xs text-rose-600 dark:text-rose-400">${accounts.error}</p>`}
+        ${!usable.length && html`<p className="text-sm text-amber-700 dark:text-amber-300">No accounts can post yet. Connect your Pages and profiles in Accounts (or add BUFFER_API_KEY for Buffer).</p>`}
+        ${usable.length > 0 && !matching.length && html`<p className="text-sm text-amber-700 dark:text-amber-300">None of your accounts are on this post's platforms (${wanted.map(id => platformOf(id).name).join(', ')}). Pick from your other accounts below, or change the platforms.</p>`}
+        ${matching.length > 0 && html`<div className="space-y-1.5">${matching.map(row)}</div>`}
+        ${others.length > 0 && (more ? html`<p className=${'text-xs font-medium pt-1 ' + muted}>Other accounts</p><div className="space-y-1.5">${others.map(row)}</div>` : html`<button className="text-xs text-violet-500 font-medium" onClick=${() => setMore(true)}>+ ${others.length} other account${others.length === 1 ? '' : 's'}</button>`)}
+        ${firstReddit && html`<div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+          <${Field} label="Reddit title"><${Input} value=${reddit.title} onChange=${e => setReddit(p => ({ ...p, title: e.target.value }))} /><//>
+          <${Field} label="Subreddit" hint=${'Blank uses ' + ((firstReddit.options || {}).subreddit ? 'r/' + firstReddit.options.subreddit : 'your profile')}><${Input} value=${reddit.subreddit} onChange=${e => setReddit(p => ({ ...p, subreddit: e.target.value }))} placeholder="e.g. afrobeats" /><//>
+        </div>`}
+        ${usable.length > 0 && html`<label className="flex items-center gap-2 text-xs"><input type="checkbox" checked=${remember} onChange=${e => setRemember(e.target.checked)} /> Use these accounts for ${brandOf(post.brand).short} next time</label>`}
       </div>`}
       ${target === 'webhook' && html`<p className=${'text-sm ' + muted}>Soulvee OS sends this post to your Make, Zapier or n8n webhook ${when === 'now' ? 'straight away' : 'at the scheduled time'}, and that scenario posts it. The server must be running then.</p>`}
       ${target === 'manual' && html`<div className="space-y-3">
         <textarea readOnly rows="6" className=${inputCls + ' text-xs'} value=${post.text} onFocus=${e => e.target.select()}></textarea>
-        <div className="flex flex-wrap gap-2"><${Btn} small onClick=${() => copyText(post.text, toast)}>Copy caption</${Btn}>${(post.platforms || []).map(id => html`<a key=${id} href=${shareLink(id, post.text)} target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Open ${platformOf(id).name}</a>`)}</div>
+        <div className="flex flex-wrap gap-2"><${Btn} small onClick=${() => copyText(post.text, toast)}>Copy caption</${Btn}>${(post.platforms || []).map(id => html`<a key=${id} href=${shareLink(id, post.text, post.title)} target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Open ${platformOf(id).name}</a>`)}</div>
         ${(post.media || []).length > 0 && html`<div className="text-xs space-y-1">${post.media.map((m, i) => html`<a key=${i} href=${m.url} target="_blank" rel="noopener" className="block truncate text-violet-500">${m.type}: ${m.url}</a>`)}</div>`}
-        <p className=${'text-xs ' + muted}>X, Threads and LinkedIn open with the caption filled in. For the others, copy the caption first.</p>
+        <p className=${'text-xs ' + muted}>X, Threads, LinkedIn, Telegram, WhatsApp and Reddit open with the text filled in. For the others, copy the caption first.</p>
       </div>`}
       ${warnings.length > 0 && target !== 'manual' && html`<div className="text-xs text-amber-700 dark:text-amber-300 space-y-0.5">${warnings.map(w => html`<p key=${w}>⚠ ${w}</p>`)}</div>`}
-      ${results && html`<div className="space-y-1">${results.map(r => html`<p key=${r.channelId} className=${'text-xs ' + (r.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>${r.ok ? '✓' : '✕'} ${r.name || r.channelId}${r.service ? ' (' + (SERVICE_LABEL[r.service] || r.service) + ')' : ''}: ${r.ok ? (r.dueAt ? 'scheduled for ' + fmtSlot(r.dueAt) : 'accepted') : r.message}</p>`)}</div>`}
+      ${results && html`<div className="space-y-1">${results.map(r => html`<p key=${r.target} className=${'text-xs ' + resultTone(r)}>${resultIcon(r)} ${r.name || r.target}${r.provider ? ' (' + networkOf(r.provider).name + ')' : ''}: ${resultLine(r)}${r.url ? html` · <a href=${r.url} target="_blank" rel="noopener" className="underline">view</a>` : null}</p>`)}</div>`}
     </div>
   <//>`;
 }
@@ -1459,8 +1866,7 @@ function ContentView({ store, caps, toast, prefill, clearPrefill, onImport }) {
   const { data, add, update, remove } = store;
   const ref = useRef(store); ref.current = store;
   const [social, setSocial] = useState(null);
-  const [channels, setChannels] = useState([]);
-  const [chanErr, setChanErr] = useState('');
+  const [accts, setAccts] = useState({ list: [], error: '' });
   const [filter, setFilter] = useState('active');
   const [brand, setBrand] = useState('all');
   const [editing, setEditing] = useState(null);
@@ -1482,22 +1888,33 @@ function ContentView({ store, caps, toast, prefill, clearPrefill, onImport }) {
     window.SoulveeOS.social.status().then(s => {
       if (!alive) return;
       setSocial(s);
-      if (s.buffer && s.allowed) window.SoulveeOS.social.channels(false).then(r => { if (alive) setChannels(r.channels); }, e => { if (alive) setChanErr(e.message); });
+      if (s.allowed) window.SoulveeOS.accounts.list(false).then(r => { if (alive) setAccts({ list: [...r.accounts.filter(a => a.can && a.can.publish), ...r.buffer], error: r.bufferError || '' }); }, e => { if (alive) setAccts({ list: [], error: e.message }); });
     }, () => { if (alive) setSocial({ buffer: false, webhook: false, allowed: false, offline: true }); });
     return () => { alive = false; };
   }, []);
 
-  // Webhook posts: mark them posted (or failed) once the server has delivered them.
-  const pendingKey = data.content.filter(p => p.status === 'scheduled' && p.publish && p.publish.jobId).map(p => p.publish.jobId).join(',');
+  // Webhook and account posts: follow each queued job until the server has posted it (or given up).
+  const jobsOf = p => (p.publish && p.publish.jobId ? [p.publish.jobId] : ((p.publish && p.publish.results) || []).filter(r => r.jobId && ['scheduled', 'sending'].includes(r.status)).map(r => r.jobId));
+  const pendingKey = data.content.filter(p => p.status === 'scheduled').flatMap(jobsOf).join(',');
   useEffect(() => {
     if (!pendingKey) return undefined;
-    const check = () => window.SoulveeOS.social.jobs(pendingKey.split(',')).then(r => r.jobs.forEach(j => {
-      const p = ref.current.data.content.find(x => x.publish && x.publish.jobId === j.id);
-      if (!p || p.status !== 'scheduled') return;
-      if (j.status === 'sent') ref.current.update('content', p.id, { status: 'posted', postedAt: j.sentAt });
-      if (j.status === 'failed') ref.current.update('content', p.id, { status: 'failed', publish: { ...p.publish, error: j.error } });
-      if (j.status === 'cancelled') ref.current.update('content', p.id, { status: 'approved' });
-    }), () => {});
+    const check = () => window.SoulveeOS.social.jobs(pendingKey.split(',')).then(r => {
+      const byId = Object.fromEntries(r.jobs.map(j => [j.id, j]));
+      ref.current.data.content.filter(p => p.status === 'scheduled' && jobsOf(p).some(id => byId[id])).forEach(p => {
+        if (p.publish.jobId) {
+          const j = byId[p.publish.jobId];
+          if (j.status === 'sent') ref.current.update('content', p.id, { status: 'posted', postedAt: j.sentAt });
+          if (j.status === 'failed') ref.current.update('content', p.id, { status: 'failed', publish: { ...p.publish, error: j.error } });
+          if (j.status === 'cancelled') ref.current.update('content', p.id, { status: 'approved' });
+          return;
+        }
+        const results = p.publish.results.map(x => (x.jobId && byId[x.jobId] ? { ...x, ...byId[x.jobId], ok: byId[x.jobId].status !== 'failed' } : x));
+        if (JSON.stringify(results) === JSON.stringify(p.publish.results)) return;
+        const done = !results.some(x => x.jobId && ['scheduled', 'sending'].includes(x.status)) && (!p.publish.when || p.publish.when === 'now' || !p.scheduledAt || Date.parse(p.scheduledAt) <= Date.now());
+        const status = !done ? 'scheduled' : results.every(x => x.status === 'cancelled') ? 'approved' : results.some(x => x.status === 'failed' || x.ok === false) ? 'failed' : 'posted';
+        ref.current.update('content', p.id, { status, ...(status === 'posted' ? { postedAt: results.map(x => x.sentAt).filter(Boolean).sort().pop() || new Date().toISOString() } : {}), publish: { ...p.publish, results } });
+      });
+    }, () => {});
     check();
     const timer = setInterval(check, 15000);
     return () => clearInterval(timer);
@@ -1577,8 +1994,11 @@ function ContentView({ store, caps, toast, prefill, clearPrefill, onImport }) {
     toast('Post saved');
   };
   const cancelJob = async p => {
-    try { await window.SoulveeOS.social.cancel(p.publish.jobId); await update('content', p.id, { status: 'approved' }); toast('Scheduled post cancelled'); }
-    catch (e) { toast(e.message); }
+    try {
+      for (const id of jobsOf(p)) await window.SoulveeOS.social.cancel(id).catch(e => { if (p.publish.jobId) throw e; });
+      await update('content', p.id, { status: 'approved', ...(p.publish.results ? { publish: { ...p.publish, results: p.publish.results.map(r => (r.jobId && r.status === 'scheduled' ? { ...r, status: 'cancelled' } : r)) } } : {}) });
+      toast('Scheduled post cancelled');
+    } catch (e) { toast(e.message); }
   };
 
   const visible = data.content.filter(p => (brand === 'all' || p.brand === brand) && (filter === 'all' || (filter === 'posted' ? p.status === 'posted' : p.status !== 'posted')));
@@ -1592,12 +2012,14 @@ function ContentView({ store, caps, toast, prefill, clearPrefill, onImport }) {
   });
   const dayLabel = key => !key ? 'Not scheduled yet' : key === localDate() ? 'Today' : key === addDays(localDate(), 1) ? 'Tomorrow' : new Date(key + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
   const counts = POST_STATUS.map(st => ({ st, n: data.content.filter(p => p.status === st).length }));
-  const connection = !social ? 'Checking publishing…' : social.offline ? 'Server unreachable — copy and post by hand' : [social.buffer && `Buffer${channels.length ? ' · ' + channels.length + ' channels' : ''}`, social.webhook && 'Webhook'].filter(Boolean).join(' + ') || 'Copy and post by hand (connect Buffer in Setup)';
+  const direct = accts.list.filter(a => a.via !== 'buffer').length;
+  const viaBuffer = accts.list.filter(a => a.via === 'buffer').length;
+  const connection = !social ? 'Checking publishing…' : social.offline ? 'Server unreachable — copy and post by hand' : [direct && `${direct} connected account${direct === 1 ? '' : 's'}`, viaBuffer && `${viaBuffer} Buffer channel${viaBuffer === 1 ? '' : 's'}`, social.webhook && 'Webhook'].filter(Boolean).join(' + ') || 'Copy and post by hand (connect accounts in Accounts)';
 
   return html`<div className="space-y-6">
     <${Section} title="Content Studio" sub="Plan, write and publish posts for every brand — AI drafts, you approve." action=${html`<${Btn} small onClick=${() => setEditing({ brand: gen.brand, platforms: gen.platforms.length ? gen.platforms : ['instagram'] })}>+ Post</${Btn}>`}>
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">${counts.map(c => html`<div key=${c.st} className="rounded-xl p-3 bg-white border border-slate-200 dark:bg-white/[0.04] dark:border-white/10 text-center"><p className="text-lg font-bold">${c.n}</p><p className=${'text-[11px] capitalize ' + muted}>${c.st}</p></div>`)}</div>
-      <p className=${'text-xs ' + muted}>Publishing: <span className="font-medium">${connection}</span>${chanErr ? html` · <span className="text-rose-500">${chanErr}</span>` : ''}</p>
+      <p className=${'text-xs ' + muted}>Publishing: <span className="font-medium">${connection}</span>${accts.error ? html` · <span className="text-rose-500">${accts.error}</span>` : ''}</p>
     <//>
 
     <${Card} className="glow">
@@ -1651,12 +2073,13 @@ function ContentView({ store, caps, toast, prefill, clearPrefill, onImport }) {
             ${p.metrics && html`<p className="text-[11px] mt-2 font-medium text-emerald-600 dark:text-emerald-400">📈 ${[p.metrics.rate !== null && p.metrics.rate !== undefined ? p.metrics.rate + '% engagement' : '', p.metrics.seen ? fmtCount(p.metrics.seen) + ' reached' : '', p.metrics.reactions ? p.metrics.reactions + ' reactions' : '', p.metrics.comments ? p.metrics.comments + ' comments' : ''].filter(Boolean).join(' · ') || 'No numbers yet'}</p>`}
             ${p.visual && html`<p className=${'text-[11px] mt-2 line-clamp-2 ' + muted}><span className="font-semibold">Visual:</span> ${p.visual}</p>`}
             ${warn.length > 0 && p.status !== 'posted' && html`<p className="text-[11px] mt-2 text-amber-700 dark:text-amber-300">⚠ ${warn.join(' · ')}</p>`}
-            ${p.status === 'scheduled' && p.publish && html`<p className=${'text-[11px] mt-2 ' + muted}>${p.publish.target === 'buffer' ? `In Buffer · ${res.filter(r => r.ok).length}/${res.length} channels${p.publish.when === 'now' ? ' · posting now' : ''}` : `Webhook · ${p.publish.when === 'now' ? 'sending now' : 'sends ' + fmtSlot(p.publish.runAt || p.scheduledAt)}`}</p>`}
-            ${(p.status === 'failed' || res.some(r => !r.ok)) && html`<div className="text-[11px] mt-2 text-rose-600 dark:text-rose-400">${res.filter(r => !r.ok).map(r => html`<p key=${r.channelId}>✕ ${r.name || SERVICE_LABEL[r.service] || r.channelId}: ${r.message}</p>`)}${p.publish && p.publish.error ? html`<p>✕ ${p.publish.error}</p>` : null}</div>`}
+            ${p.status === 'scheduled' && p.publish && p.publish.target !== 'accounts' && html`<p className=${'text-[11px] mt-2 ' + muted}>${p.publish.target === 'buffer' ? `In Buffer · ${res.filter(r => r.ok).length}/${res.length} channels${p.publish.when === 'now' ? ' · posting now' : ''}` : `Webhook · ${p.publish.when === 'now' ? 'sending now' : 'sends ' + fmtSlot(p.publish.runAt || p.scheduledAt)}`}</p>`}
+            ${p.publish && p.publish.target === 'accounts' && html`<div className="text-[11px] mt-2 space-y-0.5">${res.map(r => html`<p key=${r.target} className=${resultTone(r)}>${resultIcon(r)} ${r.name || r.target}${r.provider ? ' · ' + networkOf(r.provider).name : ''}: ${resultLine(r)}${r.url ? html` · <a href=${r.url} target="_blank" rel="noopener" className="underline">view</a>` : null}</p>`)}</div>`}
+            ${p.publish && p.publish.target !== 'accounts' && (p.status === 'failed' || res.some(r => !r.ok)) && html`<div className="text-[11px] mt-2 text-rose-600 dark:text-rose-400">${res.filter(r => !r.ok).map(r => html`<p key=${r.channelId}>✕ ${r.name || SERVICE_LABEL[r.service] || r.channelId}: ${r.message}</p>`)}${p.publish && p.publish.error ? html`<p>✕ ${p.publish.error}</p>` : null}</div>`}
             <div className="flex gap-2 mt-3 flex-wrap">
               ${['idea', 'draft'].includes(p.status) && html`<${Btn} small onClick=${() => update('content', p.id, { status: 'approved' })}>Approve</${Btn}>`}
               ${['approved', 'failed'].includes(p.status) && html`<${Btn} small onClick=${() => setPublishing(p)}>${p.status === 'failed' ? 'Try again' : 'Publish…'}</${Btn}>`}
-              ${p.status === 'scheduled' && p.publish && p.publish.jobId && html`<${Btn} small kind="ghost" onClick=${() => cancelJob(p)}>Cancel</${Btn}>`}
+              ${p.status === 'scheduled' && p.publish && jobsOf(p).length > 0 && html`<${Btn} small kind="ghost" onClick=${() => cancelJob(p)}>Cancel</${Btn}>`}
               ${p.status === 'scheduled' && p.publish && p.publish.target === 'buffer' && html`<a href="https://publish.buffer.com" target="_blank" rel="noopener" className="px-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-white/10 font-medium">Open Buffer</a>`}
               ${p.status === 'scheduled' && html`<${Btn} small kind="good" onClick=${() => update('content', p.id, { status: 'posted', postedAt: new Date().toISOString() })}>Mark posted</${Btn}>`}
               ${images && images.ready && !(p.media || []).length && String(p.visual || '').trim() && p.status !== 'posted' && html`<${Btn} small kind="ghost" onClick=${() => makeImage(p)} disabled=${!!drawing[p.id]}>${drawing[p.id] ? 'Making image…' : 'Make image'}</${Btn}>`}
@@ -1670,7 +2093,7 @@ function ContentView({ store, caps, toast, prefill, clearPrefill, onImport }) {
       </div>`)}
     <//>
     ${editing && html`<${PostModal} post=${editing} caps=${caps} toast=${toast} images=${images} onClose=${() => setEditing(null)} onSave=${savePost} />`}
-    ${publishing && social && html`<${PublishModal} post=${publishing} social=${social} channels=${channels} store=${store} toast=${toast} onClose=${() => setPublishing(null)} onDone=${patch => update('content', publishing.id, patch)} />`}
+    ${publishing && social && html`<${PublishModal} post=${publishing} social=${social} accounts=${accts} store=${store} toast=${toast} onClose=${() => setPublishing(null)} onDone=${patch => update('content', publishing.id, patch)} />`}
   </div>`;
 }
 
@@ -1857,6 +2280,7 @@ function SocialSetup({ store, toast }) {
     <div className="flex items-center justify-between gap-2 mb-2 flex-wrap"><p className="font-semibold text-sm">Social publishing</p><${Btn} small kind="ghost" onClick=${() => load(true)} disabled=${!!busy}>${busy === 'load' ? 'Checking…' : 'Refresh'}</${Btn}></div>
     ${err && html`<p className="text-sm text-rose-600 dark:text-rose-400 mb-2">${err}</p>`}
     ${status && html`<div>
+      ${row('Connected accounts (Facebook, Instagram, Threads, X, LinkedIn, Telegram, WhatsApp, Reddit, Gmail, Signal)', 'Manage in Accounts', true)}
       ${row('Buffer (Instagram, TikTok, Facebook, LinkedIn, X, Threads, YouTube, Pinterest)', status.buffer ? 'Connected' : 'Not set up', status.buffer)}
       ${row('Webhook (Make, Zapier, n8n)', status.webhook ? (status.signed ? 'On · signed' : 'On') : 'Not set up', status.webhook)}
       ${row('Publishing from this device', status.allowed ? 'Allowed' : 'Locked', status.allowed)}
@@ -2282,6 +2706,10 @@ function AssistantView({ store, caps, toast }) {
       execute: async a => { const c = a.contact ? lookupContact(ref.current.data.contacts, a.contact) : null; if (a.contact && !c) return { ok: false, error: 'No contact matches "' + a.contact + '".' }; await ref.current.add('tasks', { title: String(a.title).trim(), contactId: c ? c.id : '', due: /^\d{4}-\d{2}-\d{2}$/.test(String(a.due || '')) ? a.due : '', priority: a.priority === 'high' ? 'high' : 'normal', done: false, notes: 'Added by assistant' }); setActs(x => [...x, 'Added task: ' + a.title]); return { ok: true }; } },
     { name: 'list_tasks', description: 'Open follow-up tasks with their contact and due date: overdue, due today, upcoming or all.', inputSchema: { type: 'object', properties: { when: { type: 'string', enum: ['overdue', 'today', 'upcoming', 'all'] } } },
       execute: ({ when } = {}) => { const d = ref.current.data; const today = localDate(); return d.tasks.filter(t => !t.done && (!when || when === 'all' || (when === 'overdue' ? t.due && t.due < today : when === 'today' ? t.due === today : t.due > today))).sort((a, b) => String(a.due || '9999').localeCompare(String(b.due || '9999'))).slice(0, 40).map(t => ({ title: t.title, due: t.due || null, priority: t.priority, contact: (d.contacts.find(c => c.id === t.contactId) || {}).name || null })); } },
+    { name: 'list_conversations', description: 'Recent inbox conversations from WhatsApp, Messenger, Instagram, Telegram, Gmail, Reddit and Signal: who, which account, the last message and how many are unread. Read-only.', inputSchema: { type: 'object', properties: { unreadOnly: { type: 'boolean' } } },
+      execute: async ({ unreadOnly } = {}) => { const r = await window.SoulveeOS.inbox.list(); return r.conversations.filter(c => !unreadOnly || c.unread).slice(0, 30).map(c => ({ with: c.peer.name || c.peer.handle, platform: networkOf(c.provider).name, account: c.account, unread: c.unread, lastMessage: c.lastText.slice(0, 200), lastFrom: c.lastDir === 'out' ? 'Soulvee' : 'them', at: c.lastAt, contact: (contactForPeer(ref.current.data.contacts, c) || {}).name || null })); } },
+    { name: 'read_conversation', description: "The messages in one inbox conversation, found by the person's name, handle, phone or email. Use it to draft a reply; you can't send it, Soulvee sends replies from the Inbox.", inputSchema: { type: 'object', required: ['with'], properties: { with: { type: 'string' } } },
+      execute: async a => { const r = await window.SoulveeOS.inbox.list(); const n = String(a.with || '').toLowerCase(); const c = r.conversations.find(x => [x.peer.name, x.peer.handle, x.peer.phone, x.peer.email].some(v => v && String(v).toLowerCase().includes(n))); if (!c) return { error: 'No conversation with "' + a.with + '".' }; const full = (await window.SoulveeOS.inbox.get(c.key)).conversation; return { with: c.peer.name, platform: networkOf(c.provider).name, account: c.account, subject: c.subject || '', messages: full.messages.slice(-20).map(m => ({ from: m.dir === 'in' ? c.peer.name || 'them' : 'Soulvee', text: m.text.slice(0, 1000), at: m.at })) }; } },
     { name: 'list_content', description: 'Social posts in the content plan: title, brand, platforms, status (idea, draft, approved, scheduled, posted, failed) and scheduled time.', inputSchema: { type: 'object', properties: { status: { type: 'string', enum: POST_STATUS } } },
       execute: ({ status } = {}) => ref.current.data.content.filter(p => !status || p.status === status).slice(0, 40).map(p => ({ title: p.title, brand: brandOf(p.brand).name, platforms: p.platforms, status: p.status, scheduledAt: p.scheduledAt || null, caption: String(p.text || '').slice(0, 280), results: p.metrics || null })) },
     { name: 'get_social_results', description: 'How recent posts performed on Buffer: average engagement by platform, the best posting hour and the top posts. Use it when Soulvee asks what is working, and before planning content.', inputSchema: { type: 'object', properties: {} },
@@ -2293,7 +2721,7 @@ function AssistantView({ store, caps, toast }) {
   const preamble = () => `${voiceFor(voice)}
 You are also Soulvee's operations sub-agent inside Soulvee OS, the Soulveetainment Media Consults control unit, which runs four brands (DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emporium, EFR) plus digital products. Philosophy: systems over hustle.
 Today is ${fmtDate(localDate())}, Lagos. Money is NGN-first; format like ₦1,500,000. Lead with decisions and numbers, keep it skimmable.
-Use the tools to read real figures before answering money or pipeline questions — never invent numbers. Look people up with search_contacts or get_contact before answering questions about a client or writing to them. Only create deals, offers, draft invoices, post drafts, contacts, activities or tasks when explicitly asked. Post drafts go to the Content tab for Soulvee to approve; you can't publish anything yourself. Check get_social_results before planning posts, so new drafts build on what is working. When asked to reply to a client or fan message, write the reply in the brand voice above, ready to paste, and don't invent prices or dates that aren't in the catalogue or the message.
+Use the tools to read real figures before answering money or pipeline questions — never invent numbers. Look people up with search_contacts or get_contact before answering questions about a client or writing to them. Use list_conversations and read_conversation to see what people have written in the inbox; you can draft replies, but only Soulvee sends them. Only create deals, offers, draft invoices, post drafts, contacts, activities or tasks when explicitly asked. Post drafts go to the Content tab for Soulvee to approve; you can't publish anything yourself. Check get_social_results before planning posts, so new drafts build on what is working. When asked to reply to a client or fan message, write the reply in the brand voice above, ready to paste, and don't invent prices or dates that aren't in the catalogue or the message.
 Plain text with short lines; simple dashes for lists; no markdown headers or tables.`;
 
   const send = async text => {
@@ -2466,7 +2894,9 @@ const TABS = [
   { id: 'command', label: 'Command', icon: '◎' },
   { id: 'skills', label: 'Skills → Revenue', icon: '✦' },
   { id: 'crm', label: 'CRM', icon: '▤' },
+  { id: 'inbox', label: 'Inbox', icon: '✉' },
   { id: 'content', label: 'Content', icon: '✎' },
+  { id: 'accounts', label: 'Accounts', icon: '@' },
   { id: 'money', label: 'Money', icon: '₦' },
   { id: 'workspace', label: 'Google', icon: '✉' },
   { id: 'assistant', label: 'AI Agent', icon: '✧' },
@@ -2498,6 +2928,17 @@ function App() {
   const [dealEdit, setDealEdit] = useState(null);
   const [invEdit, setInvEdit] = useState(null);
   const [contentPrefill, setContentPrefill] = useState(null);
+  const [unread, setUnread] = useState(0);
+  const [inboxKey, setInboxKey] = useState(null);
+  const [contactToOpen, setContactToOpen] = useState(null);
+  // After signing in on a platform, the server sends the browser back with what was connected.
+  useEffect(() => {
+    const q = new URLSearchParams(location.search);
+    if (!q.has('connected') && !q.has('connect_error')) return;
+    const n = Number(q.get('count')) || 0;
+    toast(q.has('connect_error') ? q.get('connect_error') : `Connected ${n} account${n === 1 ? '' : 's'}`);
+    history.replaceState(null, '', location.pathname + location.hash);
+  }, []);
 
   useEffect(() => { document.documentElement.classList.toggle('dark', store.settings.theme !== 'light'); }, [store.settings.theme]);
   useEffect(() => {
@@ -2539,6 +2980,15 @@ function App() {
     const timer = setInterval(importInbox, 60000);
     return () => clearInterval(timer);
   }, [store.mode]);
+  // Unread messages for the Inbox badge (the Inbox itself refreshes faster while open).
+  useEffect(() => {
+    const check = () => window.SoulveeOS.inbox.list().then(r => setUnread(r.unread), () => {});
+    const timer = { id: null };
+    window.SoulveeOS.allowed().then(ok => { if (!ok) return; check(); timer.id = setInterval(check, 60000); });
+    return () => clearInterval(timer.id);
+  }, []);
+  const openConversation = key => { setInboxKey(key); go('inbox'); };
+  const showContact = c => { setContactToOpen(c.id); go('crm'); };
   // While autopilot is on, keep its copy of the offers and recent post titles up to date.
   const ctxKey = pilot && pilot.enabled ? JSON.stringify([store.data.offers.map(o => [o.id, o.name, o.status, o.brand, (o.tiers || []).map(t => num(t.price))]), store.data.content.length]) : '';
   useEffect(() => {
@@ -2554,7 +3004,9 @@ function App() {
   const view = {
     command: html`<${CommandView} store=${store} caps=${caps} go=${go} openDeal=${openDeal} openInvoice=${openInvoice} />`,
     skills: html`<${SkillsView} store=${store} caps=${caps} toast=${toast} startDeal=${startDeal} promote=${promote} />`,
-    crm: html`<${CRMView} store=${store} caps=${caps} toast=${toast} sub=${crmSub} setSub=${setCrmSub} openDeal=${openDeal} openInvoice=${openInvoice} />`,
+    crm: html`<${CRMView} store=${store} caps=${caps} toast=${toast} sub=${crmSub} setSub=${setCrmSub} openDeal=${openDeal} openInvoice=${openInvoice} openId=${contactToOpen} clearOpen=${() => setContactToOpen(null)} openConversation=${openConversation} />`,
+    inbox: html`<${InboxView} store=${store} caps=${caps} toast=${toast} openKey=${inboxKey} setOpenKey=${setInboxKey} onUnread=${setUnread} go=${go} openContact=${showContact} />`,
+    accounts: html`<${AccountsView} store=${store} toast=${toast} unread=${unread} />`,
     content: html`<${ContentView} store=${store} caps=${caps} toast=${toast} prefill=${contentPrefill} clearPrefill=${() => setContentPrefill(null)} onImport=${importInbox} />`,
     money: html`<${MoneyView} store=${store} toast=${toast} openInvoice=${openInvoice} />`,
     workspace: html`<${WorkspaceView} caps=${caps} toast=${toast} openDeal=${openDeal} />`,
@@ -2578,7 +3030,7 @@ function App() {
             <button onClick=${() => store.saveSettings({ ...store.settings, theme: dark ? 'light' : 'dark' })} className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-white/10 text-lg" aria-label="Toggle day and night mode">${dark ? '☀️' : '🌙'}</button>
           </div>
         </div>
-        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${tabs.map(t => html`<button key=${t.id} data-active=${tab === t.id ? 'true' : 'false'} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}${t.id === 'content' && reviewCount ? html`<span className="ml-0.5 px-1.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-900" aria-label=${reviewCount + ' autopilot drafts to review'}>${reviewCount}</span>` : null}</button>`)}</nav>
+        <nav className="flex gap-1.5 overflow-x-auto no-scrollbar mt-3 -mx-1 px-1">${tabs.map(t => html`<button key=${t.id} data-active=${tab === t.id ? 'true' : 'false'} onClick=${() => go(t.id)} className=${'whitespace-nowrap flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium transition ' + (tab === t.id ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10')}><span>${t.icon}</span>${t.label}${t.id === 'content' && reviewCount ? html`<span className="ml-0.5 px-1.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-900" aria-label=${reviewCount + ' autopilot drafts to review'}>${reviewCount}</span>` : null}${t.id === 'inbox' && unread ? html`<span className="ml-0.5 px-1.5 rounded-full text-[10px] font-bold bg-emerald-400 text-slate-900" aria-label=${unread + ' unread messages'}>${unread}</span>` : null}</button>`)}</nav>
       </div>
     </header>
     <main className="max-w-6xl mx-auto px-4 py-5 pb-24">

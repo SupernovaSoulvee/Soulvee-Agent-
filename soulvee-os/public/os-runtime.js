@@ -277,8 +277,13 @@
     throw Object.assign(new Error(err.message || 'Request failed (' + res.status + ').'), { code: err.code || 'http' });
   }
 
+  // Whether this device may use publishing, accounts and the inbox (asked once; the answer can't change without a reload).
+  let allowedOnce = null;
+  const allowed = () => (allowedOnce = allowedOnce || api('GET', '/api/social/status').then(s => !!s.allowed, () => false));
+
   /* ---------- backup / restore, status ---------- */
   window.SoulveeOS = {
+    allowed,
     exportData() {
       const blob = new Blob([JSON.stringify({ app: 'soulvee-os', exportedAt: new Date().toISOString(), ...state }, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
@@ -310,6 +315,21 @@
       run: () => api('POST', '/api/autopilot/run'),
       inbox: () => api('GET', '/api/autopilot/inbox'),
       ack: ids => api('POST', '/api/autopilot/inbox/ack', { ids }),
+    },
+    accounts: {
+      list: refresh => api('GET', '/api/accounts' + (refresh ? '?refresh=1' : '')),
+      connect: (provider, fields) => api('POST', '/api/accounts/connect/' + encodeURIComponent(provider), fields),
+      signIn: provider => api('POST', '/api/accounts/oauth/' + encodeURIComponent(provider)),
+      update: (id, patch) => api('PATCH', '/api/accounts/' + encodeURIComponent(id), patch),
+      remove: id => api('DELETE', '/api/accounts/' + encodeURIComponent(id)),
+      test: id => api('POST', '/api/accounts/' + encodeURIComponent(id) + '/test'),
+    },
+    inbox: {
+      list: () => api('GET', '/api/inbox'),
+      sync: () => api('POST', '/api/inbox/sync'),
+      get: key => api('GET', '/api/inbox/c/' + encodeURIComponent(key)),
+      read: key => api('POST', '/api/inbox/c/' + encodeURIComponent(key) + '/read'),
+      reply: (key, msg) => api('POST', '/api/inbox/c/' + encodeURIComponent(key) + '/reply', msg),
     },
     social: {
       status: () => api('GET', '/api/social/status'),

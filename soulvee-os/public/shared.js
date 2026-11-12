@@ -29,6 +29,9 @@
     { id: 'threads', name: 'Threads', service: 'threads', limit: 500, media: '', url: 'https://www.threads.net/' },
     { id: 'youtube', name: 'YouTube Shorts', service: 'youtube', limit: 5000, media: 'video', url: 'https://studio.youtube.com/' },
     { id: 'pinterest', name: 'Pinterest', service: 'pinterest', limit: 500, media: 'any', url: 'https://www.pinterest.com/pin-builder/' },
+    { id: 'telegram', name: 'Telegram', service: 'telegram', limit: 4096, media: '', url: 'https://web.telegram.org/' },
+    { id: 'reddit', name: 'Reddit', service: 'reddit', limit: 40000, media: '', url: 'https://www.reddit.com/submit' },
+    { id: 'whatsapp', name: 'WhatsApp', service: 'whatsapp', limit: 65536, media: '', url: 'https://web.whatsapp.com/' },
   ];
   const platformOf = id => PLATFORMS.find(p => p.id === id) || PLATFORMS[0];
   const FORMATS = ['image', 'carousel', 'reel', 'story', 'text', 'video'];
@@ -116,6 +119,7 @@
       recent.length ? `Recent post titles; don't repeat these topics too closely: ${recent.join('; ')}.` : '',
       '- caption: ready to post, starting with a scroll-stopping hook, written in the brand voice, with one clear call to action (DM, link in bio, book, buy). No hashtags inside the caption.',
       '- Any post that includes X must keep caption plus hashtags under 270 characters; Threads under 480. Other captions up to about 150 words.',
+      '- Telegram and WhatsApp posts read like a message to people who already follow the brand. Reddit posts need a plain, useful first line (it becomes the title), no hard sell and no hashtags.',
       '- hashtags: 3 to 8 relevant tags without the # sign, mixing broad and Lagos or Nigeria-specific ones (at most 3 if the post includes LinkedIn).',
       '- visual: a short brief a designer or an image tool can follow (subject, setting, colours, any short text overlay in quotes). Avoid identifiable real people\'s faces.',
       '- script: for reels and short videos, 4 to 6 timed beats with on-screen text; otherwise an empty string.',

@@ -6,6 +6,7 @@ How Soulvee OS creates and publishes posts for DJ Soulvee, Soulveetainment Media
 
 - **Content creation already runs inside the app.** In **Content**, the AI writes posts in each brand's voice. Each post gets a caption with a hook and a call to action, hashtags, a visual brief, a video script for reels and shorts, and a suggested posting time over the next two weeks. The AI agent can do the same from chat ("draft three posts about Friday's gig"), and **Promote** on any offer turns it into posts.
 - **For posting, connect Buffer.** One Buffer API key lets Soulvee OS schedule to Instagram, TikTok, Facebook, LinkedIn, X, Threads, YouTube and Pinterest. Buffer does the scheduling, so your computer doesn't have to stay on. You also skip the hard parts of going direct to each platform: TikTok's audit, Meta's app review and X's per-post fees.
+- **Or connect your accounts directly.** In **Accounts**, connect Facebook Pages, Instagram, Threads, X, LinkedIn, Telegram channels and Reddit, as many of each as you run. Soulvee OS then posts to them itself, and their messages (plus WhatsApp, Gmail and Signal) arrive in the **Inbox**. Each platform needs its own developer app; [PLATFORMS.md](PLATFORMS.md) has the steps. Buffer stays the easiest route, and the one for TikTok, YouTube and Pinterest.
 - **Make, Zapier or n8n is the alternative** if you'd rather build your own flows. Soulvee OS calls your webhook at the scheduled time with the post, signed so you can trust it.
 - **It runs weekly on its own.** **Autopilot** drafts the coming week's posts for each brand on a schedule you choose, can **make an image** from each post's brief, and learns from your **Buffer results** (what's working) every time it writes.
 - **You stay in control.** Nothing publishes until you approve it and press Publish. The AI and the autopilot can only create drafts.
@@ -15,9 +16,9 @@ How Soulvee OS creates and publishes posts for DJ Soulvee, Soulveetainment Media
 1. **Generate**: pick a brand, a goal, an optional offer to promote, the platforms and how many posts. The posts arrive as drafts on the content plan, grouped by day.
 2. **Review**: open a post to edit the caption (with character counters per platform), add media links, set the date and time, choose the Instagram format (post, reel or story) and add a first comment. **Polish with AI** rewrites the caption to your instruction ("shorter", "more hype", "add Pidgin").
 3. **Approve**, then **Publish…**:
-   - **Buffer**: choose the channels (only those matching the post's platforms are shown), then schedule for the post's time or post now. Results come back per channel, and the channels you pick become that brand's default.
+   - **Accounts**: tick the Pages, profiles, channels and Buffer channels to post to. Those on the post's platforms are listed first, and accounts given the post's brand are already ticked. Schedule for the post's time or post now. Each account's result comes back with a link to the live post, and "Try again" on a failed post ticks only the accounts that failed.
    - **Webhook**: queued on the server and sent at the scheduled time; the post turns "posted" once your scenario accepts it. Failed calls are retried 3 more times (after 1, 5 and 15 minutes). A scheduled post can be cancelled.
-   - **Post by hand**: copy the caption and open each platform. X, Threads and LinkedIn open with the caption filled in. Then press **I've posted it**.
+   - **Post by hand**: copy the caption and open each platform. X, Threads, LinkedIn, Telegram, WhatsApp and Reddit open with the caption filled in. Then press **I've posted it**.
 4. **Track**: each post shows idea, draft, approved, scheduled, posted or failed, with the reason for any failure. **Reuse** turns an old post into a new draft.
 
 ## Option A: Buffer (recommended)
@@ -90,9 +91,9 @@ Notes from current reports, worth checking against each tool's docs before you b
 - Make had no native TikTok upload module in the community reports I found. Use Buffer for TikTok.
 - X now charges per post through its own API (see below), so posting to X through Make or Zapier may need your own paid X developer access. Buffer avoids that.
 
-## Why not post directly to each platform's API?
+## Direct accounts or Buffer?
 
-It's possible, but each platform adds work or cost, and Buffer has already done it:
+Soulvee OS can post directly to each platform's API (see [PLATFORMS.md](PLATFORMS.md)), but each one adds setup or cost. Buffer has already done that work:
 
 | Platform | Going direct | Through Buffer |
 |---|---|---|

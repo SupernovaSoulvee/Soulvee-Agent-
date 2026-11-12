@@ -1,10 +1,11 @@
-// A small JSON file store for server-side state (the social posting queue).
+// A small JSON file store for server-side state (posting queue, accounts, inbox, autopilot).
 // Writes go to a temp file first and are renamed into place, one at a time,
 // so a crash mid-write never leaves a half-written file behind.
 const fs = require('node:fs');
 const path = require('node:path');
 
-function open(file, initial) {
+// opts.mode: file permissions, e.g. 0o600 for files holding access tokens or messages.
+function open(file, initial, opts = {}) {
   const tmp = file + '.tmp';
   const state = { data: load(file, initial), chain: Promise.resolve() };
 
@@ -12,7 +13,7 @@ function open(file, initial) {
     const text = JSON.stringify(state.data, null, 2);
     state.chain = state.chain
       .then(() => fs.promises.mkdir(path.dirname(file), { recursive: true }))
-      .then(() => fs.promises.writeFile(tmp, text))
+      .then(() => fs.promises.writeFile(tmp, text, opts.mode ? { mode: opts.mode } : undefined))
       .then(() => fs.promises.rename(tmp, file))
       .catch(err => console.error(`Could not save ${file}: ${err.message}`));
     return state.chain;

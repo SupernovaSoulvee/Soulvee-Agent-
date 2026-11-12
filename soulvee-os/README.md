@@ -10,11 +10,13 @@ The command centre for DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emp
   - **People**: every client, lead and fan, with phone, email, WhatsApp, Instagram, Telegram and other handles, brands, tags, stage and notes. Each contact shows their deals, invoices, payments, follow-ups and a timeline of calls, meetings and notes, plus an AI summary with the next step. Import contacts from a CSV (Google Contacts, Outlook or a spreadsheet) and export them again.
   - **Pipeline**: deals by stage and next steps. Every deal is linked to a contact, and a new client is added to People automatically. Follow-up emails are written by AI in each brand's voice and open in your email app. Calls are booked with a pre-filled Google Calendar link or a calendar file.
   - **Tasks**: follow-ups and reminders, overdue first. Ones due today also appear on Command.
-- **Content**: the Content Studio. AI writes posts in each brand's voice, with captions, hashtags, visual briefs, video scripts and posting times. It can also make an image from each brief. **Autopilot** drafts the coming week's posts on a weekly schedule, and **What's working** reads your Buffer results so the AI does more of what performs. You edit and approve everything, then publish through Buffer or a Make, Zapier or n8n webhook, or copy and post by hand. See [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
+- **Content**: the Content Studio. AI writes posts in each brand's voice, with captions, hashtags, visual briefs, video scripts and posting times. It can also make an image from each brief. **Autopilot** drafts the coming week's posts on a weekly schedule, and **What's working** reads your Buffer results so the AI does more of what performs. You edit and approve everything, then tick the accounts to post to (your connected Pages and profiles, and Buffer channels), use a Make, Zapier or n8n webhook, or copy and post by hand. Each post shows how it went on every account, with a link to the live post. See [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
+- **Inbox**: WhatsApp, Messenger, Instagram, Telegram, Gmail, Reddit and Signal messages in one list. Reply from the app (it goes out from the account the message came in on), let the AI draft a reply in the brand voice, and add the person to your contacts or link them to one.
+- **Accounts**: connect several of each: Facebook Pages, Instagram, Threads, X and LinkedIn profiles and company pages, Telegram bots and channels, WhatsApp numbers, Reddit accounts, Gmail mailboxes and Signal numbers. TikTok, YouTube and Pinterest come in through Buffer. Give each account its brands, so posts for a brand go to the right Pages, and switch accounts on or off. See [docs/PLATFORMS.md](docs/PLATFORMS.md).
 - **Money**: invoices (VAT and WHT, `INV-SMC-…` numbering, printable PDF), an income and expense ledger, FX and allocation buckets. A payment marked by mistake can be undone.
 - **AI Agent**: chat that reads your real numbers and contacts and, when you ask, logs deals, offers, contacts, activities and follow-ups, drafts invoices and adds post drafts to Content. Answers stream in as they're written.
 - **Learn**: skill tracks with AI lessons from level 1 to 5, linked to offers.
-- **Setup**: company details, tax rates, FX and allocation. Also a **Test AI** button, social publishing status with default Buffer channels for each brand, and **backup & restore**.
+- **Setup**: company details, tax rates, FX and allocation. Also a **Test AI** button, publishing status with default Buffer channels for each brand, and **backup & restore**.
 
 ## Run it
 
@@ -44,9 +46,14 @@ On a phone, open the URL and choose **Add to Home Screen** (or **Install app**) 
 | `SOULVEE_IMAGE_MODEL` | The image model. Default `gpt-image-2`. |
 | `SOULVEE_IMAGE_QUALITY` | `low`, `medium` (default) or `high`. Higher costs more per image. |
 | `CLOUDINARY_URL` | Hosts the images at permanent public links, which Buffer needs. Copy it from your Cloudinary dashboard (`cloudinary://key:secret@cloud`). |
-| `PUBLIC_URL` | Your server's public address. Without Cloudinary, images are served from `PUBLIC_URL/media/…` instead. |
+| `PUBLIC_URL` | Your server's public https address. Platforms send you back to it after signing in, Meta delivers WhatsApp messages to it, and without Cloudinary images are served from `PUBLIC_URL/media/…`. |
+| `META_APP_ID`, `META_APP_SECRET` | Your Meta app: signs in to Facebook Pages and Instagram, and checks WhatsApp webhook calls. |
+| `THREADS_APP_ID`, `THREADS_APP_SECRET` | The Threads use case of your Meta app. |
+| `X_CLIENT_ID`, `X_CLIENT_SECRET` | Your X app (OAuth 2.0). |
+| `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | Your LinkedIn app. Add `LINKEDIN_SCOPES` for company pages. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Your Google Cloud OAuth client, for Gmail. |
 | `SOULVEE_ACCESS_TOKEN` | **Needed on a public host, in Docker, or to use AI, images and publishing from another device.** Without it they only work on the computer running Soulvee OS. Open the app once on each device with `?token=YOUR_TOKEN`. |
-| `SOULVEE_DATA_DIR` | Where the server keeps the webhook queue, autopilot settings and drafts, and any images it hosts. Default `./data`. |
+| `SOULVEE_DATA_DIR` | Where the server keeps connected accounts, inbox messages, the posting queue, autopilot settings and drafts, and any images it hosts. Default `./data`. |
 | `PORT` | Default `8787`. |
 
 Restart the server after changing `.env`. **Setup → AI connection → Test AI** confirms the key and model work.
@@ -64,15 +71,17 @@ Restart the server after changing `.env`. **Setup → AI connection → Test AI*
 
 The Content tab has three ways to publish:
 
-1. **Buffer** (recommended). One API key covers Instagram, TikTok, Facebook, LinkedIn, X, Threads, YouTube and Pinterest, and Buffer handles the scheduling.
+1. **Accounts**. Tick the Pages, profiles and channels to post to. Connected accounts (Facebook Pages, Instagram, Threads, X, LinkedIn, Telegram channels, Reddit) are posted to by Soulvee OS itself at the scheduled time, retried if a network is down. Buffer channels (including TikTok, YouTube and Pinterest) are scheduled in Buffer. Accounts given the post's brand are ticked for you.
 2. **Webhook**. Soulvee OS sends the post to Make, Zapier or n8n at the scheduled time, and your scenario posts it. Failed calls are retried 3 more times (after 1, 5 and 15 minutes).
-3. **By hand**. Copy the caption; X, Threads and LinkedIn open with it filled in.
+3. **By hand**. Copy the caption; X, Threads, LinkedIn, Telegram, WhatsApp and Reddit open with it filled in.
 
 Media must be a direct public link, such as Cloudinary or Cloudflare R2. Google Drive and Dropbox share links won't work.
 
 Publishing reaches your real accounts, so without `SOULVEE_ACCESS_TOKEN` it only works on the computer running Soulvee OS. The same goes for AI and images, which spend your credit.
 
-The full guide, with the setup steps, platform rules and costs, is [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
+Connecting each platform, with the developer app it needs and its limits, is in [docs/PLATFORMS.md](docs/PLATFORMS.md). Buffer, the webhook, platform rules and costs are in [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
+
+Scheduled posts to connected accounts are sent by the server, so it must be running at the scheduled time (Buffer posts don't need it).
 
 ## Autopilot, images and results
 
@@ -86,7 +95,14 @@ Autopilot runs on the server, so the server must be on at the scheduled time. If
 
 Your business data is saved in the browser on the device you use (localStorage), so it stays private and works without a connection. Each device has its own copy. Use **Setup → Backup & restore** to export a JSON backup or move your data to another device. Back up regularly, because clearing the browser's site data deletes it.
 
-The server keeps only what has to run while you're away, in `data/`: the webhook posting queue, autopilot settings and its waiting drafts, a copy of your offers and recent post titles for the autopilot, and any images it hosts.
+The server keeps only what has to run while you're away, in `data/`:
+- **Connected accounts**, with their access tokens, in `accounts.json`;
+- **Inbox messages**, in `inbox.json`;
+- the posting queue;
+- autopilot settings and its waiting drafts, plus a copy of your offers and recent post titles for it;
+- any images it hosts.
+
+Only the server's user can read `accounts.json` and `inbox.json`, and tokens are never sent to the browser. Back up `data/` like a password file.
 
 ## Hosting
 
@@ -116,10 +132,14 @@ The Gmail lead radar and saving drafts straight into Gmail need claude.ai connec
 - `server.js`: static files, access control and routing.
 - `public/shared.js`: brand voices, platforms, the post schema and prompt builders, shared by the browser and the server so both write posts the same way.
 - `lib/claude.js`: Claude through the Anthropic SDK, streamed to the browser as server-sent events (plus structured generation for the autopilot).
-- `lib/social.js`: Buffer publishing, plus the webhook queue and scheduler.
+- `lib/social.js`: publishing to connected accounts, Buffer and the webhook, with the posting queue and scheduler.
+- `lib/accounts.js`: connected accounts and their tokens.
+- `lib/providers/`: one file per platform (Meta for Facebook and Instagram, WhatsApp, Threads, X, LinkedIn, Telegram, Reddit, Gmail, Signal): connecting, posting, reading messages and replying.
+- `lib/inbox.js`: the inbox (checking accounts, webhooks, replies).
+- `lib/oauth.js` and `lib/net.js`: platform sign-ins, and HTTP calls with plain-English errors.
 - `lib/autopilot.js`: the weekly autopilot (schedule, run, draft inbox).
 - `lib/images.js`: images from briefs (OpenAI), hosted on Cloudinary or this server.
-- `lib/store.js`: the JSON file store for the queue and the autopilot.
+- `lib/store.js`: the JSON file store for accounts, the inbox, the queue and the autopilot.
 - `public/sw.js`: makes the app open offline. If you add a file the app needs to start, list it there and bump `CACHE`.
 
 Styles are precompiled Tailwind in `public/vendor/app.css`. If you add new Tailwind classes, run `npm run build:css`.

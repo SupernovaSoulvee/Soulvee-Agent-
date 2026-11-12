@@ -1,11 +1,14 @@
-// Social publishing, two ways:
-//   Buffer  - one API key posts to Instagram, TikTok, Facebook, LinkedIn, X, Threads, YouTube
-//             and Pinterest. Buffer does the scheduling, so nothing has to stay running.
-//   Webhook - Soulvee OS calls a Make, Zapier or n8n webhook at the scheduled time and that
-//             scenario posts it. Jobs are kept on disk and retried if the webhook fails.
+// Social publishing, three ways:
+//   Accounts - Facebook Pages, Instagram, Threads, X, LinkedIn, Telegram channels and Reddit, connected
+//              directly in Accounts. Soulvee OS posts at the scheduled time and retries if a network is down.
+//   Buffer   - one API key posts to Instagram, TikTok, Facebook, LinkedIn, X, Threads, YouTube
+//              and Pinterest. Buffer does the scheduling, so nothing has to stay running.
+//   Webhook  - Soulvee OS calls a Make, Zapier or n8n webhook at the scheduled time and that
+//              scenario posts it. Jobs are kept on disk and retried if the webhook fails.
 const crypto = require('node:crypto');
 const path = require('node:path');
 const store = require('./store');
+const providers = require('./providers');
 const shared = require('../public/shared.js');
 
 const SERVICES = new Set(['instagram', 'tiktok', 'facebook', 'linkedin', 'twitter', 'threads', 'youtube', 'pinterest', 'bluesky', 'mastodon', 'googlebusiness', 'substack']);
@@ -23,7 +26,9 @@ const CREATE = `mutation SoulveeCreatePost($input: CreatePostInput!) {
 const postsQuery = (org, since, after) => `query SoulveeResults { posts(first: 50${after ? `, after: ${JSON.stringify(after)}` : ''}, input: { organizationId: ${JSON.stringify(org)}, filter: { status: [sent], startDate: ${JSON.stringify(since)} } }) { edges { node { id text dueAt sentAt channelId channelService metrics { type value unit } metricsUpdatedAt } } pageInfo { endCursor hasNextPage } } }`;
 const channelsQuery = org => `query SoulveeChannels { channels(input: { organizationId: ${JSON.stringify(org)} }) { id name displayName service avatar isQueuePaused isDisconnected isLocked } }`;
 
-function create(env, dir) {
+function create(env, dir, deps = {}) {
+  const ctx = providers.context(env);
+  const accounts = deps.accounts;
   const buffer = { key: env.BUFFER_API_KEY || '', url: env.BUFFER_API_URL || 'https://api.buffer.com' };
   const hook = { url: env.SOCIAL_WEBHOOK_URL || '', secret: env.SOCIAL_WEBHOOK_SECRET || '' };
   const tick = Number(env.SOULVEE_SCHEDULER_MS) || 30000;
@@ -117,23 +122,41 @@ function create(env, dir) {
     return { ok: false, status: res.status, message: res.error ? `Couldn't reach the webhook: ${res.error.message}` : `The webhook answered HTTP ${res.status}.` };
   }
 
+  // Posts one job to a connected account. A problem that waiting won't fix (too long, missing media,
+  // a refused sign-in) fails at once; network trouble and rate limits are retried.
+  async function toAccount(job) {
+    const acc = accounts && accounts.get(job.accountId);
+    if (!acc) return { ok: false, final: true, message: 'That account is no longer connected.' };
+    if (!acc.enabled) return { ok: false, final: true, message: 'That account is switched off in Accounts.' };
+    const mod = providers.BY_PLATFORM[acc.provider];
+    if (!mod || !mod.publish) return { ok: false, final: true, message: 'Posting to this account is not possible.' };
+    return providers.fresh(ctx, accounts, acc)
+      .then(live => mod.publish(ctx, live, job.post))
+      .then(r => ({ ok: true, postId: r.id || '', url: r.url || '' }), err => {
+        if (err.code === 'auth') accounts.mark(acc.id, err.message);
+        return { ok: false, final: !err.retry, message: err.message };
+      });
+  }
+
   async function attempt(job) {
     job.status = 'sending';
     job.attempts += 1;
     await queue.save();
-    const out = await deliver(job, 'post.publish');
+    const out = job.target === 'account' ? await toAccount(job) : await deliver(job, 'post.publish');
     const at = new Date().toISOString();
     job.history.push({ at, ...out });
     if (out.ok) {
       job.status = 'sent';
       job.sentAt = at;
       job.error = '';
+      if (out.url) job.url = out.url;
+      if (out.postId) job.postId = out.postId;
     }
-    if (!out.ok && job.attempts > RETRY.length) {
+    if (!out.ok && (out.final || job.attempts > RETRY.length)) {
       job.status = 'failed';
       job.error = out.message;
     }
-    if (!out.ok && job.attempts <= RETRY.length) {
+    if (!out.ok && !out.final && job.attempts <= RETRY.length) {
       job.status = 'scheduled';
       job.runAt = new Date(Date.now() + RETRY[job.attempts - 1]).toISOString();
       job.error = out.message;
@@ -142,10 +165,10 @@ function create(env, dir) {
   }
 
   async function run() {
-    if (state.busy || !hook.url) return;
+    if (state.busy) return;
     state.busy = true;
-    const due = queue.get().jobs.filter(j => j.status === 'scheduled' && Date.parse(j.runAt) <= Date.now());
-    for (const job of due) await attempt(job).catch(err => console.error(`Webhook job ${job.id} failed: ${err.message}`));
+    const due = queue.get().jobs.filter(j => j.status === 'scheduled' && Date.parse(j.runAt) <= Date.now() && (j.target === 'account' || hook.url));
+    for (const job of due) await attempt(job).catch(err => console.error(`Posting job ${job.id} failed: ${err.message}`));
     state.busy = false;
   }
 
@@ -174,7 +197,35 @@ function create(env, dir) {
     return summary(job);
   }
 
+  // Posts to any mix of Buffer channels ("buffer:<id>") and connected accounts. Posts for now are sent
+  // straight away and their results returned (waiting up to 25 seconds); scheduled ones are queued.
+  async function toAccounts(post) {
+    const results = [];
+    const bufferIds = post.targets.filter(t => t.startsWith('buffer:')).map(t => t.slice(7));
+    if (bufferIds.length && !buffer.key) bufferIds.forEach(id => results.push({ target: 'buffer:' + id, ok: false, message: 'Buffer is not connected: add BUFFER_API_KEY to the server.' }));
+    if (bufferIds.length && buffer.key) (await toBuffer({ ...post, channels: bufferIds })).forEach(r => results.push({ target: 'buffer:' + r.channelId, via: 'buffer', provider: r.service === 'twitter' ? 'x' : r.service, ...r }));
+    const now = new Date().toISOString();
+    const due = !post.scheduledAt || Date.parse(post.scheduledAt) <= Date.now();
+    const jobs = [];
+    post.targets.filter(t => !t.startsWith('buffer:')).forEach(id => {
+      const acc = accounts && accounts.get(id);
+      if (!acc || !acc.enabled || !(acc.can && acc.can.publish)) {
+        results.push({ target: id, ok: false, message: !acc ? 'That account is no longer connected.' : !acc.enabled ? 'That account is switched off in Accounts.' : "This account can't publish posts." });
+        return;
+      }
+      // Jobs for now start as "sending" so the scheduler can't pick them up a second time.
+      const job = { id: `job_${crypto.randomUUID()}`, target: 'account', accountId: id, post, status: due ? 'sending' : 'scheduled', runAt: post.scheduledAt || now, attempts: 0, createdAt: now, history: [] };
+      queue.get().jobs.push(job);
+      jobs.push({ job, acc });
+    });
+    if (jobs.length) await queue.save();
+    if (due && jobs.length) await Promise.race([Promise.all(jobs.map(({ job }) => attempt(job).catch(() => {}))), new Promise(r => setTimeout(r, 25000))]);
+    jobs.forEach(({ job, acc }) => results.push({ target: acc.id, name: acc.label || acc.name, provider: acc.provider, ok: job.status !== 'failed', ...summary(job) }));
+    return { target: 'accounts', results };
+  }
+
   async function publish(post, target) {
+    if (target === 'accounts') return toAccounts(post);
     if (target === 'buffer') {
       if (!buffer.key) throw fail('buffer_off', 'Buffer is not connected: add BUFFER_API_KEY to the server.');
       return { target, results: await toBuffer(post) };
@@ -324,7 +375,7 @@ function label(service) {
 }
 
 function summary(job) {
-  return { id: job.id, status: job.status, runAt: job.runAt, attempts: job.attempts, sentAt: job.sentAt || null, error: job.error || '' };
+  return { id: job.id, status: job.status, runAt: job.runAt, attempts: job.attempts, sentAt: job.sentAt || null, error: job.error || '', ...(job.target === 'account' ? { accountId: job.accountId, url: job.url || '', postId: job.postId || '' } : {}), jobId: job.id };
 }
 
 function fail(code, message) {
@@ -346,6 +397,8 @@ function clean(raw, target) {
   if (raw.scheduledAt && when < Date.now() - 60e3) throw fail('past', 'That time has already passed. Pick a time in the future, or publish now.');
   const channels = Array.isArray(raw.channels) ? raw.channels.filter(c => typeof c === 'string' && c) : [];
   if (target === 'buffer' && !channels.length) throw fail('bad_post', 'Choose at least one Buffer channel.');
+  const targets = Array.isArray(raw.targets) ? [...new Set(raw.targets.filter(t => typeof t === 'string' && /^[\w:.-]{1,80}$/.test(t)))].slice(0, 40) : [];
+  if (target === 'accounts' && !targets.length) throw fail('bad_post', 'Choose at least one account to post to.');
   const platforms = Array.isArray(raw.platforms) ? raw.platforms.filter(p => typeof p === 'string').slice(0, 12) : [];
   const igType = ['post', 'reel', 'story'].includes(raw.igType) ? raw.igType : '';
   return {
@@ -356,7 +409,10 @@ function clean(raw, target) {
     media: media.map(m => ({ type: m.type, url: String(m.url) })),
     platforms,
     channels,
+    targets,
     scheduledAt: raw.scheduledAt ? new Date(when).toISOString() : null,
+    subreddit: /^[A-Za-z0-9_]{2,24}$/.test(String(raw.subreddit || '').replace(/^\/?r\//i, '')) ? String(raw.subreddit).replace(/^\/?r\//i, '') : '',
+    redditTitle: String(raw.redditTitle || '').trim().slice(0, 300),
     igType,
     firstComment: String(raw.firstComment || '').slice(0, 2200),
     ytCategory: /^\d{1,3}$/.test(String(raw.ytCategory || '')) ? String(raw.ytCategory) : '',
