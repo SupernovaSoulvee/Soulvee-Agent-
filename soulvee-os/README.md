@@ -6,10 +6,13 @@ The command centre for DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emp
 
 - **Command**: revenue, costs, outstanding invoices, weighted pipeline and progress towards the H2 target, all in NGN.
 - **Skills → Revenue**: an offer catalogue, with an AI converter that turns a skill into a priced offer. **Promote** on any offer sends it to Content.
-- **Pipeline**: deals by stage and next steps. Follow-up emails are written by AI in each brand's voice and open in your email app. Calls are booked with a pre-filled Google Calendar link or a calendar file.
+- **CRM**:
+  - **People**: every client, lead and fan, with phone, email, WhatsApp, Instagram, Telegram and other handles, brands, tags, stage and notes. Each contact shows their deals, invoices, payments, follow-ups and a timeline of calls, meetings and notes, plus an AI summary with the next step. Import contacts from a CSV (Google Contacts, Outlook or a spreadsheet) and export them again.
+  - **Pipeline**: deals by stage and next steps. Every deal is linked to a contact, and a new client is added to People automatically. Follow-up emails are written by AI in each brand's voice and open in your email app. Calls are booked with a pre-filled Google Calendar link or a calendar file.
+  - **Tasks**: follow-ups and reminders, overdue first. Ones due today also appear on Command.
 - **Content**: the Content Studio. AI writes posts in each brand's voice, with captions, hashtags, visual briefs, video scripts and posting times. It can also make an image from each brief. **Autopilot** drafts the coming week's posts on a weekly schedule, and **What's working** reads your Buffer results so the AI does more of what performs. You edit and approve everything, then publish through Buffer or a Make, Zapier or n8n webhook, or copy and post by hand. See [docs/SOCIAL-AUTOMATION.md](docs/SOCIAL-AUTOMATION.md).
 - **Money**: invoices (VAT and WHT, `INV-SMC-…` numbering, printable PDF), an income and expense ledger, FX and allocation buckets. A payment marked by mistake can be undone.
-- **AI Agent**: chat that reads your real numbers and, when you ask, logs deals and offers, drafts invoices and adds post drafts to Content. Answers stream in as they're written.
+- **AI Agent**: chat that reads your real numbers and contacts and, when you ask, logs deals, offers, contacts, activities and follow-ups, drafts invoices and adds post drafts to Content. Answers stream in as they're written.
 - **Learn**: skill tracks with AI lessons from level 1 to 5, linked to offers.
 - **Setup**: company details, tax rates, FX and allocation. Also a **Test AI** button, social publishing status with default Buffer channels for each brand, and **backup & restore**.
 
