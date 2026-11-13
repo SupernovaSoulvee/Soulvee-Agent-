@@ -1,0 +1,23 @@
+{
+  "name": "soulvee-os",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Soulvee OS: deals, invoices, money, offers, social content and an AI agent for the Soulvee brands.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "build:css": "npx tailwindcss@3.4.17 -c tailwind/tailwind.config.js -i tailwind/input.css -o public/vendor/app.css --minify",
+    "test": "node test/run.js",
+    "test:browser": "node test/run.js --browser"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
