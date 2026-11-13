@@ -282,25 +282,32 @@ const F = (scope, text) => {
   await phone.close();
 
   /* --- 20. Without SOULVEE_ACCESS_TOKEN, AI, images and publishing only work on this computer --- */
-  const REMOTE = 'http://192.0.2.2:8790'; // this machine's network address, so requests arrive as another device
+  // Requests to this machine's own network address arrive from a non-loopback address, like another
+  // device on the Wi-Fi. A computer with no network connection has no such address, so there the
+  // requests go to localhost marked as forwarded by a proxy, which the server also treats as another device.
+  const lan = Object.values(require('node:os').networkInterfaces()).flat().find(a => a && a.family === 'IPv4' && !a.internal);
+  const REMOTE = lan ? `http://${lan.address}:8790` : BASE;
+  const AWAY = lan ? {} : { 'x-forwarded-for': '198.51.100.7' };
+  const away = async route => (await fetch(REMOTE + route, { headers: AWAY })).json();
   const callsBefore = (await claudeLog()).length;
   const post = (url, headers = {}) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }) });
   const viaProxy = await post(BASE + '/api/claude', { 'x-forwarded-for': '203.0.113.9' });
   const viaProxyBody = await viaProxy.json().catch(() => ({}));
   check('A request forwarded by a proxy on this computer is turned away from Claude', viaProxy.status === 401 && /only available on the computer running Soulvee OS/.test(viaProxyBody.error && viaProxyBody.error.message), viaProxy.status + ' ' + JSON.stringify(viaProxyBody));
-  const remoteHealth = await json(REMOTE + '/api/health');
+  const remoteHealth = await away('/api/health');
   check('Health tells another device why AI is off', remoteHealth.ai === false && remoteHealth.reason === 'local_only', JSON.stringify(remoteHealth));
-  const remoteCodes = [(await post(REMOTE + '/api/claude')).status, (await post(REMOTE + '/api/ai-test')).status, (await post(REMOTE + '/api/images/generate')).status];
+  const remoteCodes = [(await post(REMOTE + '/api/claude', AWAY)).status, (await post(REMOTE + '/api/ai-test', AWAY)).status, (await post(REMOTE + '/api/images/generate', AWAY)).status];
   check('Another device cannot use Claude, Test AI or images', remoteCodes.every(c => c === 401), remoteCodes.join(','));
-  const pubCodes = [(await json(REMOTE + '/api/social/status')).allowed, (await fetch(REMOTE + '/api/social/channels')).status, (await json(REMOTE + '/api/autopilot')).allowed, (await post(REMOTE + '/api/autopilot/run')).status];
+  const pubCodes = [(await away('/api/social/status')).allowed, (await fetch(REMOTE + '/api/social/channels', { headers: AWAY })).status, (await away('/api/autopilot')).allowed, (await post(REMOTE + '/api/autopilot/run', AWAY)).status];
   check('Another device cannot publish or run the autopilot', pubCodes.join(',') === 'false,403,false,403', pubCodes.join(','));
   check('Turned-away requests never reach Claude', (await claudeLog()).length === callsBefore);
   check('This computer still has AI', (await json(BASE + '/api/health')).ai === true);
-  const rp = await browser.newPage();
+  const rctx = await browser.newContext({ extraHTTPHeaders: AWAY });
+  const rp = await rctx.newPage();
   await rp.goto(REMOTE + '/#assistant', { waitUntil: 'load' });
   await rp.waitForSelector('text=AI only works on the computer running Soulvee OS');
   check('The AI tab on another device explains how to turn it on', (await rp.locator('main').innerText()).includes('set SOULVEE_ACCESS_TOKEN on the server'));
-  await rp.close();
+  await rctx.close();
 
   check('No console or page errors', errs.length === 0, errs.join(' || '));
   await browser.close();
