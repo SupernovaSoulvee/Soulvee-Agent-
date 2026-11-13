@@ -362,8 +362,24 @@ function CommandView({ store, caps, go, openDeal, openInvoice }) {
   const unpriced = data.offers.filter(o => o.status !== 'retired' && !(o.tiers || []).some(t => num(t.price) > 0)).slice(0, 4);
   const dueTasks = data.tasks.filter(t => !t.done && t.due && t.due <= localDate()).sort((a, b) => String(a.due).localeCompare(String(b.due))).slice(0, 5);
   const whoFor = t => (t.contactId && data.contacts.find(c => c.id === t.contactId)) || null;
+  // Business records live only in this browser, so Command asks for a backup when the last one is
+  // more than a week old (or there's never been one) and there's something to lose.
+  const [, setBackedUp] = useState(0);
+  const runtime = window.SoulveeOS;
+  const last = runtime && runtime.lastBackup ? runtime.lastBackup() : null;
+  const records = data.deals.length + data.invoices.length + data.contacts.length + data.ledger.length;
+  const daysSince = last ? Math.floor((Date.now() - Date.parse(last)) / 864e5) : NaN;
+  const remindBackup = last !== null && records > 0 && !(daysSince < 7);
+  const backupNow = () => { runtime.exportData(); setBackedUp(Date.now()); };
 
   return html`<div className="space-y-6">
+    ${remindBackup && html`<div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-500/10 flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="font-semibold text-sm">Back up your data</p>
+        <p className=${'text-xs mt-1 ' + muted}>${Number.isNaN(daysSince) ? "You haven't exported a backup yet" : `Last backup ${daysSince} days ago`}. Your deals, invoices and contacts are saved only in this browser, so a backup file keeps them safe if this device is lost or its data is cleared.</p>
+      </div>
+      <${Btn} small onClick=${backupNow}>Export backup</${Btn}>
+    </div>`}
     <${Section} title="Command" sub="Skills → offers → pipeline → cash, across every Soulveetainment brand." action=${html`<${Chips} value=${period} onChange=${setPeriod} options=${Object.entries(PERIODS).map(([v, p]) => ({ v, l: p.label }))} />`}>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <${Stat} label="Collected" value=${ngnShort(s.income)} sub=${usd ? '≈ $' + Math.round(s.income / usd).toLocaleString() : s.period} grad="from-emerald-500 to-teal-600" />

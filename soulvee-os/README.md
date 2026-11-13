@@ -2,6 +2,8 @@
 
 The command centre for DJ Soulvee, Soulveetainment Media Consults, Soulvee's Emporium, EFR and digital products, as a standalone app. It started as the Soulveetainment Control Unit artifact on claude.ai.
 
+**New to running it? Start with the [owner's guide](docs/OWNERS-GUIDE.md):** running, fixing, extending, backups and costs in plain English. Every developer term used here is defined in six words in the [glossary](docs/GLOSSARY.md), and every file is explained in the [file map](docs/FILE-MAP.md).
+
 ## What's in it
 
 - **Command**: revenue, costs, outstanding invoices, weighted pipeline and progress towards the H2 target, all in NGN.
@@ -24,10 +26,12 @@ You need Node 18 or newer.
 
 ```bash
 cd soulvee-os
-npm install
-cp .env.example .env        # then add your keys (see below)
-npm start                   # http://localhost:8787
+npm install                 # downloads the libraries Soulvee OS uses (once, and after updates)
+cp .env.example .env        # creates your settings file (Windows: copy .env.example .env), then add your keys
+npm start                   # starts the server: open http://localhost:8787
 ```
+
+To check everything works, run `npm test` (the server checks, about 10 seconds) or `npm run test:browser` (every check, about 3 minutes; the first time, run `npx playwright install chromium`). The checks use stand-ins for Claude, Buffer and every platform, and never read your `.env`.
 
 Without any keys the app still works. AI features stay off, and posts are copied and posted by hand.
 
@@ -55,6 +59,7 @@ On a phone, open the URL and choose **Add to Home Screen** (or **Install app**) 
 | `SOULVEE_ACCESS_TOKEN` | **Needed on a public host, in Docker, or to use AI, images and publishing from another device.** Without it they only work on the computer running Soulvee OS. Open the app once on each device with `?token=YOUR_TOKEN`. |
 | `SOULVEE_DATA_DIR` | Where the server keeps connected accounts, inbox messages, the posting queue, autopilot settings and drafts, and any images it hosts. Default `./data`. |
 | `PORT` | Default `8787`. |
+| `SOULVEE_ENV_FILE` | Set it when starting the server (not in `.env`) to read another settings file instead of `.env`. `none` reads no file; the tests use that, so they can never pick up your keys. |
 
 Restart the server after changing `.env`. **Setup → AI connection → Test AI** confirms the key and model work.
 
@@ -93,7 +98,7 @@ Autopilot runs on the server, so the server must be on at the scheduled time. If
 
 ## Data
 
-Your business data is saved in the browser on the device you use (localStorage), so it stays private and works without a connection. Each device has its own copy. Use **Setup → Backup & restore** to export a JSON backup or move your data to another device. Back up regularly, because clearing the browser's site data deletes it.
+Your business data is saved in the browser on the device you use (localStorage), so it stays private and works without a connection. Each device has its own copy. Use **Setup → Backup & restore** to export a JSON backup or move your data to another device. Back up regularly, because clearing the browser's site data deletes it. Command reminds you when you have records and no backup from the last 7 days, with an **Export backup** button.
 
 The server keeps only what has to run while you're away, in `data/`:
 - **Connected accounts**, with their access tokens, in `accounts.json`;
@@ -102,12 +107,12 @@ The server keeps only what has to run while you're away, in `data/`:
 - autopilot settings and its waiting drafts, plus a copy of your offers and recent post titles for it;
 - any images it hosts.
 
-Only the server's user can read `accounts.json` and `inbox.json`, and tokens are never sent to the browser. Back up `data/` like a password file.
+On Mac and Linux, only the server's user account can read `accounts.json` and `inbox.json`. Windows doesn't use those permission settings, so keep the project inside your own user folder there. Tokens are never sent to the browser. Back up `data/` like a password file.
 
 ## Hosting
 
 - **Docker**: `docker build -t soulvee-os . && docker run -p 8787:8787 -v soulvee-data:/app/data --env-file .env soulvee-os`. Your `.env` is never copied into the image. Set `SOULVEE_ACCESS_TOKEN` in it too: inside Docker every visit counts as another device, so AI, images and publishing need the token.
-- **Render / Railway / Fly.io**: deploy this folder as a Node service with build command `npm install` and start command `node server.js`, then set the variables above. If you use the webhook or the autopilot, give the service a persistent disk for `data/` and keep it running. Otherwise a redeploy wipes the queue and autopilot settings. Buffer on its own needs neither.
+- **Render / Railway / Fly.io**: deploy this folder as a Node service with build command `npm ci --omit=dev` (it skips the testing tools) and start command `node server.js`, then set the variables above. If you use the webhook or the autopilot, give the service a persistent disk for `data/` and keep it running. Otherwise a redeploy wipes the queue and autopilot settings. Buffer on its own needs neither.
 
 On a public host, AI, images and publishing stay off until you set `SOULVEE_ACCESS_TOKEN`, so nobody else can spend your Claude credit or post to your accounts.
 
@@ -127,6 +132,8 @@ The Gmail lead radar and saving drafts straight into Gmail need claude.ai connec
 
 ## Developing
 
+`CLAUDE.md` holds the build protocol Claude follows in this folder, and [docs/FILE-MAP.md](docs/FILE-MAP.md) explains every file. The main ones:
+
 - `public/index.html`: the whole interface (React + htm, no build step).
 - `public/os-runtime.js`: browser storage, the streamed AI client and agent loop, and the publishing API client.
 - `server.js`: static files, access control and routing.
@@ -141,5 +148,7 @@ The Gmail lead radar and saving drafts straight into Gmail need claude.ai connec
 - `lib/images.js`: images from briefs (OpenAI), hosted on Cloudinary or this server.
 - `lib/store.js`: the JSON file store for accounts, the inbox, the queue and the autopilot.
 - `public/sw.js`: makes the app open offline. If you add a file the app needs to start, list it there and bump `CACHE`.
+
+- `test/`: the automatic checks. `run.js` gives each suite in `suites/` fresh stand-ins (`stand-ins/`) and a fresh server with an empty data folder and no `.env`. Run `npm test` before every commit and `npm run test:browser` before every push; GitHub runs both on every change to this folder.
 
 Styles are precompiled Tailwind in `public/vendor/app.css`. If you add new Tailwind classes, run `npm run build:css`.

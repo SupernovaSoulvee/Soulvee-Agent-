@@ -7,7 +7,9 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
-loadEnv(path.join(__dirname, '.env'));
+// Settings come from .env next to this file. SOULVEE_ENV_FILE points somewhere else, and "none" skips
+// it: the test runner sets "none" so tests can never pick up your real keys and accounts.
+if (process.env.SOULVEE_ENV_FILE !== 'none') loadEnv(path.resolve(process.env.SOULVEE_ENV_FILE || path.join(__dirname, '.env')));
 
 const claude = require('./lib/claude');
 const social = require('./lib/social');

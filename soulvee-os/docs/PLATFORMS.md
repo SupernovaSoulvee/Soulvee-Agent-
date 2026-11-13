@@ -22,7 +22,7 @@ Here `<your address>` is `PUBLIC_URL` if it is set, otherwise `http://localhost:
 
 **Public address.** WhatsApp, and instant Messenger and Instagram messages, need Meta to reach your server, so set `PUBLIC_URL` to its public https address. Threads also only accepts an https return address. On your own computer you can use a tunnel such as Cloudflare Tunnel or ngrok. Set `SOULVEE_ACCESS_TOKEN` whenever the server can be reached from the internet.
 
-**Where the keys live.** App IDs and secrets go in `.env`. Restart the server after changing it. Tokens you paste, and those that sign-ins return, are kept on the server in `data/accounts.json`. Only the server's user can read that file, and tokens are never sent to the browser. Messages are kept in `data/inbox.json`. Treat the `data/` folder like a password file.
+**Where the keys live.** App IDs and secrets go in `.env`. Restart the server after changing it. Tokens you paste, and those that sign-ins return, are kept on the server in `data/accounts.json`. On Mac and Linux, only the server's user account can read that file; Windows doesn't use those permission settings, so keep the project inside your own user folder there. Tokens are never sent to the browser. Messages are kept in `data/inbox.json`. Treat the `data/` folder like a password file.
 
 ## Facebook Pages and Instagram
 
@@ -81,7 +81,7 @@ Soulvee OS checks Meta's signature on every webhook call and refuses unsigned or
 
 **Limits**
 - Replies are free-form within 24 hours of the customer's last message. After that WhatsApp only allows an approved template, and the Inbox asks for its name.
-- Meta charges per template message.
+- Meta charges per template message: about ₦83 for a marketing template to a Nigerian number. Press reports say that since 1 October 2026 Meta also charges for replies inside the 24-hour window, at about ₦14 each in Nigeria; these were free before. Check Meta's rate card before relying on these (naira at ₦1,345 to the dollar).
 - Soulvee OS sends one-to-one replies, not bulk messages.
 
 ## Threads
@@ -115,7 +115,7 @@ Soulvee OS checks Meta's signature on every webhook call and refuses unsigned or
 4. Go to Accounts → X → **Sign in with X**.
 
 **Limits**
-- X charges for API use. Check that your developer account's plan or credits include creating posts.
+- X charges for API use: about ₦20 a post, and about ₦270 for a post with a link, from third-party reports. Check that your developer account's plan or credits include creating posts.
 - Posts are limited to 280 characters.
 - Videos on X go through Buffer.
 

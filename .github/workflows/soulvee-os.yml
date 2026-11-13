@@ -1,0 +1,54 @@
+# Runs Soulvee OS's automatic checks whenever something in soulvee-os/ changes, and shows the result
+# on GitHub as a green tick or a red cross. The checks use stand-ins, so they need no keys or secrets.
+name: soulvee-os
+
+on:
+  pull_request:
+    paths:
+      - "soulvee-os/**"
+      - ".github/workflows/soulvee-os.yml"
+  push:
+    branches: [dev]
+    paths:
+      - "soulvee-os/**"
+      - ".github/workflows/soulvee-os.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: soulvee-os
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: soulvee-os/package-lock.json
+
+      - name: Install the libraries
+        run: npm ci
+
+      - name: Server checks
+        run: npm test
+
+      - name: Download the test browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Every check, including the browser ones
+        run: npm run test:browser
+
+      - name: Keep the screenshots and logs when a check fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soulvee-os-test-output
+          path: soulvee-os/test/output
+          retention-days: 7

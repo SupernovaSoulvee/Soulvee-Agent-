@@ -99,10 +99,12 @@ Soulvee OS can post directly to each platform's API (see [PLATFORMS.md](PLATFORM
 |---|---|---|
 | Instagram | Graph API needs a Business or Creator account and a Meta developer app (app review to publish for others), plus a limit of 100 posts a day | Connect the account in Buffer |
 | TikTok | Content Posting API: unaudited apps can only post privately, for up to 5 users a day, until TikTok audits them | Connect the account in Buffer |
-| X | Pay-per-use API since 2026: about $0.015 a post and about $0.20 for a post with a link (third-party reports) | No per-post fee from Soulvee OS |
+| X | Pay-per-use API since 2026: about $0.015 (₦20) a post and about $0.20 (₦270) for a post with a link (third-party reports) | No per-post fee from Soulvee OS |
 | Facebook, LinkedIn, YouTube, Threads, Pinterest | A separate developer app and approval for each | One key covers them |
 
-Other all-in-one posting APIs exist. [Ayrshare](https://www.ayrshare.com/pricing) is one, but third-party price checks put it at about $149 a month and up, far more than Buffer for one creator's channels.
+Other all-in-one posting APIs exist. [Ayrshare](https://www.ayrshare.com/pricing) is one, but third-party price checks put it at about $149 (₦200,000) a month and up, far more than Buffer for one creator's channels.
+
+Naira figures in this guide use ₦1,345 to the dollar, the mid-market rate in early November 2026; your bank's rate and card fees make them higher. The [owner's guide](OWNERS-GUIDE.md#what-it-costs) has a monthly budget.
 
 ## Images from each brief
 
@@ -121,7 +123,7 @@ How the images are made:
 
 - They use the brand's look: violet and magenta nightlife for DJ Soulvee, blue tech for SMC, gold and teal for the Emporium, and so on. Stories, reels, TikTok and Pinterest get tall images; everything else is square. They're saved as JPEG, which Instagram requires.
 - Words appear on the image only when the brief asks for them, in quotes, spelled exactly. To avoid fake likenesses, images show scenes, hands, silhouettes or crowds from behind rather than identifiable faces.
-- The default model is `gpt-image-2`; change it with `SOULVEE_IMAGE_MODEL` and quality with `SOULVEE_IMAGE_QUALITY`. Each image costs a few cents to a few tens of cents, depending on model and quality; check OpenAI's pricing.
+- The default model is `gpt-image-2`; change it with `SOULVEE_IMAGE_MODEL` and quality with `SOULVEE_IMAGE_QUALITY`. Each image costs a few cents to a few tens of cents depending on model and quality: about $0.053 (₦70) for a square image at medium quality, from third-party reports of OpenAI's rates. Check OpenAI's pricing.
 - For video, use the script with CapCut, Higgsfield or your own footage, upload the file somewhere public, and paste the link under **Media**.
 
 ## What's working: learning from results

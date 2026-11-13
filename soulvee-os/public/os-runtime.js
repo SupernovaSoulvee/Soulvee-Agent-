@@ -13,6 +13,7 @@
  */
 (function () {
   const KEY = 'soulvee-os:v1';
+  const LAST_BACKUP = 'soulvee-os:lastBackup'; // when this device last exported a backup; Command reminds you weekly
   const listeners = new Set();
 
   // The server turns ?token=… into a cookie, so drop it from the address bar.
@@ -282,6 +283,8 @@
   const allowed = () => (allowedOnce = allowedOnce || api('GET', '/api/social/status').then(s => !!s.allowed, () => false));
 
   /* ---------- backup / restore, status ---------- */
+  // Noting the backup date can fail when browser storage is full or blocked; the backup file is unaffected.
+  const remember = when => { try { localStorage.setItem(LAST_BACKUP, when); } catch (e) { /* nothing to undo */ } };
   window.SoulveeOS = {
     allowed,
     exportData() {
@@ -293,6 +296,7 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      remember(new Date().toISOString());
     },
     async importData(file) {
       let parsed;
@@ -301,6 +305,12 @@
       if (!isObj(parsed) || !isObj(parsed.collections)) throw new Error("that file isn't a Soulvee OS backup");
       const next = clean(parsed);
       commit(() => { state = next; });
+      // This device now holds exactly what that file holds, so the file counts as its latest backup.
+      if (!Number.isNaN(Date.parse(parsed.exportedAt))) remember(parsed.exportedAt);
+    },
+    lastBackup() {
+      try { return localStorage.getItem(LAST_BACKUP) || ''; }
+      catch (e) { return ''; }
     },
     aiOffReason: () => OFF[health && health.reason] || OFF.no_key,
     aiTest: () => api('POST', '/api/ai-test'),
